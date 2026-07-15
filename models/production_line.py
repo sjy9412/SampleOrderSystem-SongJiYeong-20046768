@@ -32,6 +32,39 @@ class ProductionLine(ObservableModel):
         total_time = avg_time * actual_qty
         return actual_qty, total_time
 
+    def get_current_info(self) -> dict | None:
+        current = self.get_current()
+        if current is None:
+            return None
+        order = self._order_model.get_by_id(current["order_id"])
+        sample = self._sample_model.get_by_id(order["sample_id"])
+        stock = self._inventory_model.get_stock(order["sample_id"])
+        shortage = max(0, order["quantity"] - stock)
+        actual_qty, total_time = self.calculate_production(
+            shortage, sample["yield_rate"], sample["avg_production_time"]
+        )
+        return {
+            "order_id": order["id"],
+            "sample_name": sample["name"],
+            "quantity": order["quantity"],
+            "actual_qty": actual_qty,
+            "total_time": total_time,
+        }
+
+    def get_queue_info(self) -> list[dict]:
+        result = []
+        for i, item in enumerate(self.get_queue(), 1):
+            order = self._order_model.get_by_id(item["order_id"])
+            sample = self._sample_model.get_by_id(order["sample_id"])
+            result.append({
+                "position": i,
+                "order_id": order["id"],
+                "sample_name": sample["name"],
+                "customer_name": order["customer_name"],
+                "quantity": order["quantity"],
+            })
+        return result
+
     def complete(self, order_id: str) -> None:
         order = self._order_model.get_by_id(order_id)
         sample = self._sample_model.get_by_id(order["sample_id"])
