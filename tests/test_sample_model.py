@@ -104,3 +104,24 @@ def test_add_succeeds_when_only_name_differs(model):
     model.add("ChipX", 2.5, 0.95)
     result = model.add("ChipY", 2.5, 0.95)
     assert result["name"] == "ChipY"
+
+
+# ── 시료 ID 순번 부여 ──────────────────────────────────────────────────────────
+
+def test_first_sample_gets_id_S001(model):
+    sample = model.add("AlphaChip", 2.5, 0.95)
+    assert sample["id"] == "S-001"
+
+
+def test_samples_get_sequential_ids(model):
+    s1 = model.add("AlphaChip", 2.5, 0.95)
+    s2 = model.add("BetaChip", 1.0, 0.80)
+    assert s1["id"] == "S-001"
+    assert s2["id"] == "S-002"
+
+
+def test_id_continues_from_existing_count(model):
+    model.add("AlphaChip", 2.5, 0.95)
+    model.add("BetaChip", 1.0, 0.80)
+    s3 = model.add("GammaChip", 3.0, 0.90)
+    assert s3["id"] == "S-003"

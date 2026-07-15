@@ -111,7 +111,9 @@ def generate_domain_data(
     names = random.sample(_SAMPLE_NAMES, min(sample_count, len(_SAMPLE_NAMES)))
     samples = []
     for name in names:
+        existing_count = len(json_store.read_all("samples"))
         record = json_store.create("samples", {
+            "id": f"S-{existing_count + 1:03d}",
             "name": name,
             "avg_production_time": round(random.uniform(0.5, 10.0), 1),
             "yield_rate": round(random.uniform(0.70, 0.99), 2),
