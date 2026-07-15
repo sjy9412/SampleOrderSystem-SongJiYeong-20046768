@@ -130,6 +130,27 @@ def test_complete_removes_order_from_queue(
     assert production_line.get_queue() == []
 
 
+def test_complete_advances_to_next_order_in_queue(
+    production_line, order_model, inventory_model, sample_model
+):
+    sample = sample_model.add("시료M", avg_production_time=1.0, yield_rate=1.0)
+    inventory_model.increase(sample["id"], 0)
+
+    order1 = order_model.reserve(sample["id"], "첫번째", 5)
+    order2 = order_model.reserve(sample["id"], "두번째", 3)
+    order_model.set_producing(order1["id"])
+    order_model.set_producing(order2["id"])
+
+    production_line.enqueue(order1["id"])
+    production_line.enqueue(order2["id"])
+
+    production_line.complete(order1["id"])
+
+    current = production_line.get_current()
+    assert current is not None
+    assert current["order_id"] == order2["id"]
+
+
 # ── get_current_info 확장 ────────────────────────────────────────────────────
 
 def test_get_current_info_includes_stock_and_shortage(
