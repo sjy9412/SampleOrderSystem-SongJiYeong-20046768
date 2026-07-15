@@ -16,6 +16,7 @@ class ReleaseViewStub:
         model.subscribe(self)
         self._inputs = iter([])
         self.shown_orders = []
+        self.release_result = None
         self.errors = []
 
     def set_inputs(self, *values):
@@ -24,16 +25,20 @@ class ReleaseViewStub:
     def _next(self):
         return next(self._inputs)
 
-    def show_menu(self): pass
-    def get_menu_choice(self): return self._next()
-    def get_order_id(self, action): return self._next()
-    def show_orders(self, orders): self.shown_orders = list(orders)
-    def show_error(self, message): self.errors.append(message)
-    def show_invalid_input(self): pass
-    def show_exit(self): pass
-    def get_title_input(self): return ""
-    def get_id_input(self, action): return ""
-    def on_model_changed(self, event): pass
+    def show_confirmed_orders(self, orders):
+        self.shown_orders = list(orders)
+
+    def get_release_number(self, count):
+        return self._next()
+
+    def show_release_result(self, order):
+        self.release_result = order
+
+    def show_error(self, message):
+        self.errors.append(message)
+
+    def on_model_changed(self, event):
+        pass
 
 
 @pytest.fixture
@@ -51,41 +56,64 @@ def controller(order_model, view):
     return ReleaseController(order_model, view)
 
 
-# ── TC-1: 메뉴 1 → CONFIRMED 주문만 목록 표시 ────────────────────────────────
+# ── TC-1: 진입 시 CONFIRMED 주문 목록 자동 표시 ─────────────────────────────────
 
-def test_list_confirmed_orders_shows_only_confirmed(controller, order_model, view):
-    order1 = order_model.reserve("sample-1", "홍길동", 5)
-    order_model.confirm(order1["id"])
-    order2 = order_model.reserve("sample-2", "이순신", 3)
-    order_model.confirm(order2["id"])
-    order_model.reserve("sample-3", "강감찬", 2)  # RESERVED — 표시 안 됨
-
-    view.set_inputs("1", "0")
-    controller.run()
-
-    assert len(view.shown_orders) == 2
-    assert all(o["status"] == "CONFIRMED" for o in view.shown_orders)
-
-
-# ── TC-2: 메뉴 2 → order_id 입력 → CONFIRMED → RELEASE ──────────────────────
-
-def test_release_transitions_confirmed_order_to_release(controller, order_model, view):
-    order = order_model.reserve("sample-1", "홍길동", 5)
+def test_shows_confirmed_orders_immediately_on_entry(controller, order_model, view):
+    order = order_model.reserve("S-001", "홍길동", 5)
     order_model.confirm(order["id"])
 
-    view.set_inputs("2", order["id"], "0")
+    view.set_inputs("0")
+    controller.run()
+
+    assert len(view.shown_orders) == 1
+    assert view.shown_orders[0]["status"] == "CONFIRMED"
+
+
+# ── TC-2: CONFIRMED 주문 없으면 목록 표시 후 바로 복귀 ──────────────────────────
+
+def test_no_confirmed_orders_returns_without_prompting(controller, order_model, view):
+    order_model.reserve("S-001", "홍길동", 5)  # RESERVED 상태
+
+    controller.run()
+
+    assert view.shown_orders == []
+    assert view.release_result is None
+
+
+# ── TC-3: 번호 입력으로 RELEASE 전환 ────────────────────────────────────────────
+
+def test_release_by_number_transitions_to_release(controller, order_model, view):
+    order = order_model.reserve("S-001", "홍길동", 5)
+    order_model.confirm(order["id"])
+
+    view.set_inputs("1")
     controller.run()
 
     updated = order_model.get_by_id(order["id"])
     assert updated["status"] == "RELEASE"
 
 
-# ── TC-3: CONFIRMED 아닌 주문 출고 시도 → 오류 표시 ──────────────────────────
+# ── TC-4: 출고 완료 후 결과 표시 ────────────────────────────────────────────────
 
-def test_release_non_confirmed_order_shows_error(controller, order_model, view):
-    order = order_model.reserve("sample-1", "홍길동", 5)  # RESERVED 상태
+def test_shows_release_result_after_processing(controller, order_model, view):
+    order = order_model.reserve("S-001", "홍길동", 5)
+    order_model.confirm(order["id"])
 
-    view.set_inputs("2", order["id"], "0")
+    view.set_inputs("1")
+    controller.run()
+
+    assert view.release_result is not None
+    assert view.release_result["status"] == "RELEASE"
+
+
+# ── TC-5: 유효하지 않은 번호 입력 시 오류 표시 ──────────────────────────────────
+
+def test_invalid_number_shows_error(controller, order_model, view):
+    order = order_model.reserve("S-001", "홍길동", 5)
+    order_model.confirm(order["id"])
+
+    view.set_inputs("99")
     controller.run()
 
     assert len(view.errors) == 1
+    assert view.release_result is None
