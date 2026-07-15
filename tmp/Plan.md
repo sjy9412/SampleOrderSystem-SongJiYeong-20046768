@@ -1,63 +1,98 @@
-# TDD Plan — SampleController 재고 연동
+# TDD Plan — 시료 중복 등록 방지
 
 ## Goal
 
-`SampleController`가 시료 목록/검색 결과를 표시할 때, `stocks={}` 빈 딕트 대신
-`InventoryModel`에서 조회한 실제 재고 수량을 `show_samples(samples, stocks)`에 전달한다.
+이름(`name`), 평균 생산 시간(`avg_production_time`), 수율(`yield_rate`) 세 가지가 모두 동일한 시료가 이미 존재하면 등록을 거부한다.
+
+- **Model**: `SampleModel.add()`에서 `ValueError("이미 등록된 시료입니다.")` raise
+- **Controller**: `_handle_register()`에서 `ValueError`를 catch하여 `view.show_error()` 호출
 
 ---
 
 ## 작성할 테스트
 
-**파일**: `tests/test_sample_controller.py`
-
-### 테스트 1 — 목록 조회 시 실제 재고 전달
+### 테스트 1 — Model: 중복 속성이면 ValueError (파일: `tests/test_sample_model.py`)
 
 ```python
-def test_list_passes_stock_quantities_to_view(model, inventory_model, view):
-    sample = model.add("ChipA", 1.0, 0.8)
-    inventory_model.increase(sample["id"], 50)
-
-    view._choices = iter(['2', '0'])
-    SampleController(model, inventory_model, view).run()
-
-    assert view.shown_stocks[sample["id"]] == 50
+def test_add_raises_when_duplicate_attributes(model):
+    model.add("ChipX", 2.5, 0.95)
+    with pytest.raises(ValueError, match="이미 등록된 시료입니다."):
+        model.add("ChipX", 2.5, 0.95)
 ```
 
-### 테스트 2 — 검색 시 실제 재고 전달
+### 테스트 2 — Model: 속성 하나라도 다르면 정상 등록 (파일: `tests/test_sample_model.py`)
 
 ```python
-def test_search_passes_stock_quantities_to_view(model, inventory_model, view):
-    sample = model.add("AlphaChip", 1.0, 0.8)
-    inventory_model.increase(sample["id"], 30)
+def test_add_succeeds_when_only_name_differs(model):
+    model.add("ChipX", 2.5, 0.95)
+    result = model.add("ChipY", 2.5, 0.95)  # 이름만 다름
+    assert result["name"] == "ChipY"
+```
 
-    view._choices = iter(['3', '0'])
-    view._keyword = "Alpha"
+### 테스트 3 — Controller: 중복 시료 등록 시 show_error 호출 (파일: `tests/test_sample_controller.py`)
+
+```python
+def test_register_shows_error_on_duplicate(model, inventory_model, view):
+    model.add("ChipX", 2.5, 0.95)
+
+    view._choices = iter(['1', '0'])
+    view._sample_input = ("ChipX", 2.5, 0.95)
     SampleController(model, inventory_model, view).run()
 
-    assert view.shown_stocks[sample["id"]] == 30
+    assert view.last_error == "이미 등록된 시료입니다."
 ```
+
+> `MockSampleView.show_error`가 `last_error`를 저장하도록 수정 필요.
 
 ---
 
 ## 예상 실패 이유
 
-- `SampleController.__init__`이 `inventory_model`을 인자로 받지 않으므로 `TypeError` 발생
-- `MockSampleView.show_samples`가 `stocks`를 버리므로 `shown_stocks` 속성이 없어 `AttributeError` 발생
+| 테스트 | 실패 원인 |
+|--------|-----------|
+| 테스트 1 | `SampleModel.add()`에 중복 체크 없음 → `ValueError` 미발생 |
+| 테스트 2 | 테스트 1 수정 후 부작용 없음 확인용 (처음엔 통과할 수 있음) |
+| 테스트 3 | `MockSampleView`에 `last_error` 없음 + `_handle_register`에 except 없음 |
 
 ---
 
 ## 구현 방향 (최소한의 변경)
 
-1. **`MockSampleView`** — `show_samples`에서 `stocks`도 저장하도록 수정
-   (`self.shown_stocks = stocks`)
+### 1. `MockSampleView` 수정 (`tests/test_sample_controller.py`)
 
-2. **`SampleController.__init__`** — `inventory_model` 파라미터 추가
+```python
+def show_error(self, msg):
+    self.last_error = msg
+```
 
-3. **`_handle_list` / `_handle_search`** — `inventory_model.get_all_stocks()` 호출 후
-   `{s["sample_id"]: s["quantity"] for s in ...}` 형태로 변환하여 전달
+초기값 `self.last_error = None` 추가.
 
-4. **`app.py`** — `SampleController(sample_model, inventory_model, SampleView(...))` 로 수정
+### 2. `SampleModel.add()` 수정 (`models/sample.py`)
+
+```python
+def add(self, name, avg_production_time, yield_rate):
+    existing = [
+        s for s in store.read_all(COLLECTION)
+        if s["name"] == name
+        and s["avg_production_time"] == avg_production_time
+        and s["yield_rate"] == yield_rate
+    ]
+    if existing:
+        raise ValueError("이미 등록된 시료입니다.")
+    record = store.create(COLLECTION, {...})
+    ...
+```
+
+### 3. `SampleController._handle_register()` 수정 (`controllers/sample_controller.py`)
+
+```python
+def _handle_register(self):
+    name, avg_time, yield_rate = self._view.get_sample_input()
+    try:
+        self._model.add(name, avg_time, yield_rate)
+    except ValueError as e:
+        self._view.show_error(str(e))
+```
 
 ---
 
@@ -65,6 +100,8 @@ def test_search_passes_stock_quantities_to_view(model, inventory_model, view):
 
 | 파일 | 변경 내용 |
 |------|-----------|
-| `tests/test_sample_controller.py` | 픽스처 추가, 테스트 2개 추가, `MockSampleView` 수정 |
-| `controllers/sample_controller.py` | `__init__` + `_handle_list` + `_handle_search` |
-| `app.py` | `SampleController` 생성 시 `inventory_model` 전달 |
+| `tests/test_sample_model.py` | 테스트 2개 추가 |
+| `tests/test_sample_controller.py` | `MockSampleView` 수정, 테스트 1개 추가 |
+| `models/sample.py` | `add()`에 중복 체크 로직 추가 |
+| `controllers/sample_controller.py` | `_handle_register()`에 `try/except` 추가 |
+| `docs/PRD.md` | 시료 중복 방지 규칙 명시 (완료) |
