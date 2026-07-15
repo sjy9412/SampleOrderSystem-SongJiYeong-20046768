@@ -3,8 +3,9 @@ from __future__ import annotations
 
 class SampleController:
 
-    def __init__(self, model, view) -> None:
+    def __init__(self, model, inventory_model, view) -> None:
         self._model = model
+        self._inventory_model = inventory_model
         self._view = view
 
     def run(self) -> None:
@@ -28,9 +29,11 @@ class SampleController:
 
     def _handle_list(self) -> None:
         samples = self._model.get_all()
-        self._view.show_samples(samples, {})
+        stocks = {s["sample_id"]: s["quantity"] for s in self._inventory_model.get_all_stocks()}
+        self._view.show_samples(samples, stocks)
 
     def _handle_search(self) -> None:
         keyword = self._view.get_search_keyword()
         samples = self._model.search(keyword)
-        self._view.show_samples(samples, {})
+        stocks = {s["sample_id"]: s["quantity"] for s in self._inventory_model.get_all_stocks()}
+        self._view.show_samples(samples, stocks)
