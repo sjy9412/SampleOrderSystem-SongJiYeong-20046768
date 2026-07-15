@@ -10,6 +10,7 @@ Dummy Data Generator PoC
 from __future__ import annotations
 
 import random
+from datetime import date
 from typing import Any
 
 from faker import Faker
@@ -123,10 +124,19 @@ def generate_domain_data(
 
     # 2. orders — 앞 queue_count개는 PRODUCING 고정, 나머지는 랜덤
     actual_queue = min(queue_count, order_count)
+    today = date.today().strftime("%Y%m%d")
+    prefix = f"ORD-{today}-"
+    existing_nos = [
+        o["order_no"] for o in json_store.read_all("orders")
+        if o.get("order_no", "").startswith(prefix)
+    ]
+    seq_start = max((int(n.split("-")[2]) for n in existing_nos), default=0) + 1
     orders = []
     for i in range(order_count):
         status = "PRODUCING" if i < actual_queue else random.choice(_NON_PRODUCING_STATUSES)
+        order_no = f"{prefix}{(seq_start + i):04d}"
         record = json_store.create("orders", {
+            "order_no": order_no,
             "sample_id": random.choice(samples)["id"],
             "customer_name": random.choice(_CUSTOMER_NAMES),
             "quantity": random.randint(10, 500),
