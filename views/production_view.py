@@ -33,11 +33,15 @@ class ProductionView:
                   border_style="bright_black", expand=False)
         t.add_column("항목", style="dim", min_width=16)
         t.add_column("값")
-        t.add_row("주문 ID",      Text(info_data["order_id"], style="dim cyan"))
+        t.add_row("주문번호",     Text(info_data["order_no"], style="dim cyan"))
         t.add_row("시료명",       info_data["sample_name"])
-        t.add_row("주문 수량",    str(info_data["quantity"]))
-        t.add_row("실 생산량",    str(info_data["actual_qty"]))
-        t.add_row("총 생산시간", f"{info_data['total_time']:.1f} min")
+        t.add_row("주문량",       f"{info_data['quantity']} ea")
+        t.add_row("재고",         f"{info_data['stock']} ea")
+        t.add_row("부족분",       f"{info_data['shortage']} ea")
+        yield_pct = int(info_data["yield_rate"] * 100)
+        t.add_row("실 생산량",    f"{info_data['actual_qty']} ea  (수율 {yield_pct}% / {info_data['avg_time']} min)")
+        t.add_row("진행율",       f"{info_data['progress_pct']:.1f}%")
+        t.add_row("완료 예정",    info_data["estimated_completion"])
         console.print(Panel(t, title="[bold cyan]생산 중[/bold cyan]",
                             border_style="bright_black", expand=False))
 
@@ -52,10 +56,12 @@ class ProductionView:
         rows = [
             {
                 "순번": str(item["position"]),
-                "주문 ID": item["order_id"],
+                "주문번호": item["order_no"],
                 "시료명": item["sample_name"],
-                "고객명": item["customer_name"],
-                "수량": f"{item['quantity']} ea",
+                "주문량": f"{item['quantity']} ea",
+                "부족분": f"{item['shortage']} ea",
+                "실생산량": f"{item['actual_qty']} ea",
+                "완료 예정": item["estimated_completion"],
             }
             for item in items
         ]

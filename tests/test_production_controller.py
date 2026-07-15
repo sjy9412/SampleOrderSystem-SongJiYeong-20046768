@@ -127,7 +127,7 @@ def test_queue_shows_waiting_orders_in_order(
 
     assert len(view.shown_queue) == 2
     assert view.shown_queue[0]["position"] == 1
-    assert view.shown_queue[0]["order_id"] == order1["id"]
+    assert view.shown_queue[0]["order_no"] == order1["order_no"]
     assert view.shown_queue[0]["sample_name"] == "AAA"
     assert view.shown_queue[0]["customer_name"] == "홍길동"
     assert view.shown_queue[1]["position"] == 2

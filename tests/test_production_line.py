@@ -1,4 +1,5 @@
 import pytest
+from datetime import datetime, timezone, timedelta
 from models.production_line import ProductionLine
 from models.order import OrderModel
 from models.inventory import InventoryModel
@@ -127,3 +128,134 @@ def test_complete_removes_order_from_queue(
     production_line.complete(order["id"])
 
     assert production_line.get_queue() == []
+
+
+# ── get_current_info 확장 ────────────────────────────────────────────────────
+
+def test_get_current_info_includes_stock_and_shortage(
+    production_line, order_model, inventory_model, sample_model
+):
+    sample = sample_model.add("시료D", avg_production_time=2.0, yield_rate=0.8)
+    inventory_model.increase(sample["id"], 30)
+    order = order_model.reserve(sample["id"], "테스트", 50)
+    order_model.set_producing(order["id"])
+    production_line.enqueue(order["id"])
+
+    info = production_line.get_current_info()
+
+    assert info["stock"] == 30
+    assert info["shortage"] == 20  # 50 - 30
+
+
+def test_get_current_info_includes_yield_rate_and_avg_time(
+    production_line, order_model, inventory_model, sample_model
+):
+    sample = sample_model.add("시료E", avg_production_time=1.5, yield_rate=0.75)
+    inventory_model.increase(sample["id"], 0)
+    order = order_model.reserve(sample["id"], "테스트", 10)
+    order_model.set_producing(order["id"])
+    production_line.enqueue(order["id"])
+
+    info = production_line.get_current_info()
+
+    assert info["yield_rate"] == pytest.approx(0.75)
+    assert info["avg_time"] == pytest.approx(1.5)
+
+
+def test_get_current_info_includes_order_no(
+    production_line, order_model, inventory_model, sample_model
+):
+    sample = sample_model.add("시료F", avg_production_time=1.0, yield_rate=1.0)
+    inventory_model.increase(sample["id"], 0)
+    order = order_model.reserve(sample["id"], "테스트", 5)
+    order_model.set_producing(order["id"])
+    production_line.enqueue(order["id"])
+
+    info = production_line.get_current_info()
+
+    assert "order_no" in info
+    assert info["order_no"].startswith("ORD-")
+
+
+def test_get_current_info_calculates_progress_pct(
+    production_line, order_model, inventory_model, sample_model
+):
+    sample = sample_model.add("시료G", avg_production_time=2.0, yield_rate=1.0)
+    inventory_model.increase(sample["id"], 0)
+    order = order_model.reserve(sample["id"], "테스트", 10)
+    order_model.set_producing(order["id"])
+    production_line.enqueue(order["id"])
+
+    # total_time = 2.0 × 10 = 20분, now = created_at + 10분 → 50%
+    queue_item = production_line.get_current()
+    created_at = datetime.fromisoformat(queue_item["created_at"])
+    fake_now = created_at + timedelta(minutes=10)
+
+    info = production_line.get_current_info(now=fake_now)
+
+    assert info["progress_pct"] == pytest.approx(50.0)
+
+
+def test_get_current_info_includes_estimated_completion(
+    production_line, order_model, inventory_model, sample_model
+):
+    sample = sample_model.add("시료H", avg_production_time=1.0, yield_rate=1.0)
+    inventory_model.increase(sample["id"], 0)
+    order = order_model.reserve(sample["id"], "테스트", 5)
+    order_model.set_producing(order["id"])
+    production_line.enqueue(order["id"])
+
+    info = production_line.get_current_info()
+
+    assert "estimated_completion" in info
+    assert isinstance(info["estimated_completion"], str)
+    assert len(info["estimated_completion"]) > 0
+
+
+# ── get_queue_info 확장 ──────────────────────────────────────────────────────
+
+def test_get_queue_info_includes_order_no(
+    production_line, order_model, inventory_model, sample_model
+):
+    sample = sample_model.add("시료I", avg_production_time=1.0, yield_rate=1.0)
+    inventory_model.increase(sample["id"], 0)
+    order = order_model.reserve(sample["id"], "테스트", 5)
+    order_model.set_producing(order["id"])
+    production_line.enqueue(order["id"])
+
+    queue_info = production_line.get_queue_info()
+
+    assert queue_info[0]["order_no"] == order["order_no"]
+
+
+def test_get_queue_info_includes_shortage_and_actual_qty(
+    production_line, order_model, inventory_model, sample_model
+):
+    sample = sample_model.add("시료J", avg_production_time=2.0, yield_rate=0.5)
+    inventory_model.increase(sample["id"], 5)
+    order = order_model.reserve(sample["id"], "테스트", 15)
+    order_model.set_producing(order["id"])
+    production_line.enqueue(order["id"])
+
+    queue_info = production_line.get_queue_info()
+
+    assert queue_info[0]["shortage"] == 10        # 15 - 5
+    assert queue_info[0]["actual_qty"] == 20      # ceil(10 / 0.5)
+
+
+def test_get_queue_info_cumulative_estimated_completion(
+    production_line, order_model, inventory_model, sample_model
+):
+    sample = sample_model.add("시료K", avg_production_time=2.0, yield_rate=1.0)
+    inventory_model.increase(sample["id"], 0)
+    order1 = order_model.reserve(sample["id"], "고객A", 10)  # total_time=20min
+    order2 = order_model.reserve(sample["id"], "고객B", 5)   # total_time=10min
+    order_model.set_producing(order1["id"])
+    order_model.set_producing(order2["id"])
+    production_line.enqueue(order1["id"])
+    production_line.enqueue(order2["id"])
+
+    queue_info = production_line.get_queue_info()
+
+    # 두 번째 항목 예상 완료 시각이 첫 번째보다 늦어야 함
+    assert queue_info[1]["estimated_completion"] > queue_info[0]["estimated_completion"]
