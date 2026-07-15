@@ -1,29 +1,51 @@
-# TDD Plan — STEP 1: Sample 모델
+# TDD Plan — STEP 2: 시료 관리 View / Controller
 
-## Goal
+## 목표 (Goal)
 
-`models/sample.py`에 `SampleModel` 클래스를 구현한다.  
-다음 네 가지 동작을 검증하는 테스트를 먼저 작성한다.
+`SampleController`가 View에서 입력을 받아 `SampleModel`을 올바르게 조작하는지 검증한다.
 
-1. `add()` — 시료 등록 후 ADDED 이벤트 발행
-2. `get_all()` — 전체 시료 목록 반환
-3. `get_by_id()` — ID로 단건 조회 (없으면 None)
-4. `search()` — 이름 기준 부분 문자열 검색
+- 메뉴 선택 `1` → `SampleModel.add()` 호출 → 시료 실제 저장됨
+- 메뉴 선택 `2` → `SampleModel.get_all()` 결과를 `view.show_samples()`에 전달
+- 메뉴 선택 `3` → `SampleModel.search()` 결과를 `view.show_samples()`에 전달
+- 잘못된 선택 → `view.show_invalid_input()` 호출
 
 ---
 
-## 작성할 테스트 코드 (`tests/test_sample_model.py`)
+## 작성할 테스트 (`tests/test_sample_controller.py`)
+
+**전략:**
+- View는 I/O 경계 → `MockSampleView`로 대체 (mock 허용)
+- SampleModel은 실제 객체 사용, DB는 autouse 픽스처로 clean
 
 ```python
 import pytest
 from models.sample import SampleModel
-from models.base import ModelEvent, EventType
+from controllers.sample_controller import SampleController
 
-# ── 픽스처 ────────────────────────────────────────────────────────────────────
+
+class MockSampleView:
+    def __init__(self):
+        self.shown_samples = None
+        self._choices = iter(['0'])
+        self._sample_input = None
+        self._keyword = None
+        self.invalid_input_shown = False
+
+    def show_menu(self): pass
+    def get_menu_choice(self): return next(self._choices)
+    def get_sample_input(self): return self._sample_input
+    def get_search_keyword(self): return self._keyword
+    def show_samples(self, samples, stocks): self.shown_samples = samples
+    def show_error(self, msg): pass
+    def show_invalid_input(self): self.invalid_input_shown = True
+    def show_exit(self): pass
+    def on_model_changed(self, event): pass
+    def get_title_input(self): return ""
+    def get_id_input(self, action): return ""
+
 
 @pytest.fixture(autouse=True)
 def clean_db():
-    """각 테스트 전후로 samples 컬렉션을 초기화한다."""
     from db import json_store as store
     store.reset("samples")
     yield
@@ -35,142 +57,106 @@ def model():
     return SampleModel()
 
 
-# ── add ───────────────────────────────────────────────────────────────────────
-
-def test_add_returns_sample_with_id(model):
-    sample = model.add("AlphaChip", 2.5, 0.95)
-    assert sample["id"] is not None
-    assert sample["name"] == "AlphaChip"
-    assert sample["avg_production_time"] == 2.5
-    assert sample["yield_rate"] == 0.95
+@pytest.fixture
+def view():
+    return MockSampleView()
 
 
-def test_add_emits_added_event(model):
-    received = []
-
-    class Observer:
-        def on_model_changed(self, event: ModelEvent):
-            received.append(event)
-
-    model.subscribe(Observer())
-    model.add("BetaChip", 1.0, 0.80)
-
-    assert len(received) == 1
-    assert received[0].type == EventType.ADDED
-    assert received[0].payload["name"] == "BetaChip"
-
-
-# ── get_all ───────────────────────────────────────────────────────────────────
-
-def test_get_all_returns_empty_list_initially(model):
-    assert model.get_all() == []
-
-
-def test_get_all_returns_all_added_samples(model):
-    model.add("AlphaChip", 2.5, 0.95)
-    model.add("BetaChip", 1.0, 0.80)
+def test_register_adds_sample_to_model(model, view):
+    view._choices = iter(['1', '0'])
+    view._sample_input = ("TestChip", 2.5, 0.9)
+    SampleController(model, view).run()
     samples = model.get_all()
-    assert len(samples) == 2
-    names = {s["name"] for s in samples}
-    assert names == {"AlphaChip", "BetaChip"}
+    assert len(samples) == 1
+    assert samples[0]["name"] == "TestChip"
+    assert samples[0]["avg_production_time"] == 2.5
+    assert samples[0]["yield_rate"] == 0.9
 
 
-# ── get_by_id ─────────────────────────────────────────────────────────────────
-
-def test_get_by_id_returns_correct_sample(model):
-    added = model.add("GammaChip", 3.0, 0.90)
-    found = model.get_by_id(added["id"])
-    assert found is not None
-    assert found["name"] == "GammaChip"
-
-
-def test_get_by_id_returns_none_for_unknown_id(model):
-    assert model.get_by_id("nonexistent-id") is None
+def test_list_passes_all_samples_to_view(model, view):
+    model.add("ChipA", 1.0, 0.8)
+    model.add("ChipB", 2.0, 0.9)
+    view._choices = iter(['2', '0'])
+    SampleController(model, view).run()
+    assert view.shown_samples is not None
+    assert len(view.shown_samples) == 2
 
 
-# ── search ────────────────────────────────────────────────────────────────────
-
-def test_search_returns_matching_samples(model):
-    model.add("AlphaChip", 2.5, 0.95)
-    model.add("BetaChip", 1.0, 0.80)
-    model.add("AlphaSensor", 1.5, 0.70)
-
-    results = model.search("Alpha")
-    assert len(results) == 2
-    assert all("Alpha" in s["name"] for s in results)
-
-
-def test_search_returns_empty_list_when_no_match(model):
-    model.add("AlphaChip", 2.5, 0.95)
-    assert model.search("Zeta") == []
+def test_search_passes_matching_samples_to_view(model, view):
+    model.add("AlphaChip", 1.0, 0.8)
+    model.add("BetaChip", 2.0, 0.9)
+    view._choices = iter(['3', '0'])
+    view._keyword = "Alpha"
+    SampleController(model, view).run()
+    assert view.shown_samples is not None
+    assert len(view.shown_samples) == 1
+    assert view.shown_samples[0]["name"] == "AlphaChip"
 
 
-def test_search_is_case_insensitive(model):
-    model.add("AlphaChip", 2.5, 0.95)
-    results = model.search("alpha")
-    assert len(results) == 1
+def test_invalid_choice_shows_invalid_input(model, view):
+    view._choices = iter(['X', '0'])
+    SampleController(model, view).run()
+    assert view.invalid_input_shown is True
 ```
 
 ---
 
 ## 예상 실패 이유
 
-- `models/sample.py`가 존재하지 않으므로 `ImportError`로 실패한다.
-- `EventType`에 `LISTED`, `SEARCHED`가 없으므로 추가가 필요하다.
+`controllers/sample_controller.py`가 존재하지 않으므로 `ImportError`로 실패한다.
 
 ---
 
-## 구현 방향 (최소한의 코드)
+## 구현 방향 (GREEN 단계에서 작성할 최소 코드)
 
-### 1. `models/base.py` — EventType 확장
-
-```python
-class EventType(Enum):
-    ADDED    = auto()
-    TOGGLED  = auto()
-    DELETED  = auto()
-    LISTED   = auto()   # 추가
-    SEARCHED = auto()   # 추가
-```
-
-### 2. `models/sample.py` 신규 생성
+### `controllers/sample_controller.py`
 
 ```python
-from __future__ import annotations
-from models.base import ObservableModel, ModelEvent, EventType
-from db import json_store as store
+class SampleController:
+    def __init__(self, model, view):
+        self._model = model
+        self._view = view
 
-COLLECTION = "samples"
+    def run(self):
+        while True:
+            self._view.show_menu()
+            choice = self._view.get_menu_choice()
+            if choice == '0':
+                break
+            elif choice == '1':
+                self._handle_register()
+            elif choice == '2':
+                self._handle_list()
+            elif choice == '3':
+                self._handle_search()
+            else:
+                self._view.show_invalid_input()
 
-class SampleModel(ObservableModel):
-    def add(self, name: str, avg_production_time: float, yield_rate: float) -> dict:
-        record = store.create(COLLECTION, {
-            "name": name,
-            "avg_production_time": avg_production_time,
-            "yield_rate": yield_rate,
-        })
-        self._notify(ModelEvent(type=EventType.ADDED, payload=record))
-        return record
+    def _handle_register(self):
+        name, avg_time, yield_rate = self._view.get_sample_input()
+        self._model.add(name, avg_time, yield_rate)
 
-    def get_all(self) -> list[dict]:
-        return store.read_all(COLLECTION)
+    def _handle_list(self):
+        samples = self._model.get_all()
+        self._view.show_samples(samples, {})
 
-    def get_by_id(self, sample_id: str) -> dict | None:
-        return store.read_one(COLLECTION, sample_id)
-
-    def search(self, keyword: str) -> list[dict]:
-        keyword_lower = keyword.lower()
-        return [s for s in store.read_all(COLLECTION)
-                if keyword_lower in s["name"].lower()]
+    def _handle_search(self):
+        keyword = self._view.get_search_keyword()
+        samples = self._model.search(keyword)
+        self._view.show_samples(samples, {})
 ```
+
+### `views/sample_view.py`
+
+BaseView Protocol을 구현하며, 생성자에서 `model.subscribe(self)`로 Observer 등록한다.  
+`show_samples(samples, stocks)`의 stocks는 STEP 4 전까지 빈 dict를 수신한다.
 
 ---
 
-## 파일 변경 목록
+## 파일 목록
 
-| 파일 | 작업 |
+| 파일 | 역할 |
 |------|------|
-| `models/base.py` | `EventType`에 `LISTED`, `SEARCHED` 추가 |
-| `models/sample.py` | 신규 생성 |
-| `tests/test_sample_model.py` | 신규 생성 (테스트 먼저) |
-| `tests/__init__.py` | 신규 생성 (패키지 인식) |
+| `tests/test_sample_controller.py` | RED: 실패하는 테스트 |
+| `controllers/sample_controller.py` | GREEN: Controller 구현 |
+| `views/sample_view.py` | GREEN: View 구현 |
