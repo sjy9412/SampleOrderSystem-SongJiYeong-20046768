@@ -5,9 +5,11 @@ from typing import Any, Protocol
 
 
 class EventType(Enum):
-    ADDED   = auto()
-    TOGGLED = auto()
-    DELETED = auto()
+    ADDED    = auto()
+    TOGGLED  = auto()
+    DELETED  = auto()
+    LISTED   = auto()
+    SEARCHED = auto()
 
 
 @dataclass(frozen=True)
