@@ -150,7 +150,7 @@ def generate_domain_data(
     for sample in random.sample(samples, actual_inv):
         json_store.create("inventories", {
             "sample_id": sample["id"],
-            "quantity": random.randint(1, 300),
+            "quantity": random.randint(0, 300),
         })
     print(f"[✓] 'inventories' {actual_inv}건 삽입")
 
