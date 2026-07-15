@@ -1,6 +1,7 @@
 import re
 import pytest
 from models.order import OrderModel
+from models.sample import SampleModel
 from models.inventory import InventoryModel
 from controllers.order_controller import ReserveController
 from controllers.approve_reject_controller import ApproveRejectController
@@ -11,9 +12,11 @@ def clean_db():
     from db import json_store as store
     store.reset("orders")
     store.reset("inventories")
+    store.reset("samples")
     yield
     store.reset("orders")
     store.reset("inventories")
+    store.reset("samples")
 
 
 class ProductionLineStub:
@@ -34,6 +37,7 @@ class OrderViewStub:
         self.last_order_no = None
         self.last_status = None
         self.cancelled = False
+        self.last_error = None
 
     def set_inputs(self, *values):
         self._inputs = iter(values)
@@ -50,7 +54,8 @@ class OrderViewStub:
     def get_approve_or_reject(self): return self._next()
     def show_orders(self, orders): self.shown_orders = list(orders)
     def show_stock_insufficient(self, stock, required): self.stock_insufficient_shown = True
-    def show_error(self, message): pass
+    def show_error(self, message):
+        self.last_error = message
     def show_invalid_input(self): pass
     def show_exit(self): pass
     def get_title_input(self): return ""
@@ -71,6 +76,11 @@ def order_model():
 
 
 @pytest.fixture
+def sample_model():
+    return SampleModel()
+
+
+@pytest.fixture
 def inventory_model():
     return InventoryModel()
 
@@ -86,8 +96,8 @@ def view(order_model):
 
 
 @pytest.fixture
-def reserve_ctrl(order_model, view):
-    return ReserveController(order_model, view)
+def reserve_ctrl(order_model, sample_model, view):
+    return ReserveController(order_model, sample_model, view)
 
 
 @pytest.fixture
@@ -97,13 +107,14 @@ def approve_reject_ctrl(order_model, inventory_model, production_line, view):
 
 # ── TC-1: 주문 접수 → RESERVED 주문 생성 ──────────────────────────────────────
 
-def test_reserve_creates_reserved_order(reserve_ctrl, order_model, view):
-    view.set_inputs(("sample-1", "홍길동", 5), "Y")
+def test_reserve_creates_reserved_order(reserve_ctrl, order_model, sample_model, view):
+    sample = sample_model.add("실리콘 웨이퍼", 5.0, 0.95)
+    view.set_inputs((sample["id"], "홍길동", 5), "Y")
     reserve_ctrl.run()
 
     orders = order_model.get_reserved()
     assert len(orders) == 1
-    assert orders[0]["sample_id"] == "sample-1"
+    assert orders[0]["sample_id"] == sample["id"]
     assert orders[0]["customer_name"] == "홍길동"
     assert orders[0]["quantity"] == 5
     assert orders[0]["status"] == "RESERVED"
@@ -111,16 +122,18 @@ def test_reserve_creates_reserved_order(reserve_ctrl, order_model, view):
 
 # ── TC-7: 확인 패널이 표시된다 ───────────────────────────────────────────────
 
-def test_reserve_shows_confirmation_before_reserving(reserve_ctrl, view):
-    view.set_inputs(("sample-1", "홍길동", 5), "Y")
+def test_reserve_shows_confirmation_before_reserving(reserve_ctrl, sample_model, view):
+    sample = sample_model.add("실리콘 웨이퍼", 5.0, 0.95)
+    view.set_inputs((sample["id"], "홍길동", 5), "Y")
     reserve_ctrl.run()
     assert view.confirmation_shown is True
 
 
 # ── TC-8: N 선택 시 주문이 생성되지 않는다 ──────────────────────────────────
 
-def test_reserve_cancels_on_n(reserve_ctrl, order_model, view):
-    view.set_inputs(("sample-1", "홍길동", 5), "N")
+def test_reserve_cancels_on_n(reserve_ctrl, order_model, sample_model, view):
+    sample = sample_model.add("실리콘 웨이퍼", 5.0, 0.95)
+    view.set_inputs((sample["id"], "홍길동", 5), "N")
     reserve_ctrl.run()
     assert len(order_model.get_reserved()) == 0
     assert view.cancelled is True
@@ -128,12 +141,23 @@ def test_reserve_cancels_on_n(reserve_ctrl, order_model, view):
 
 # ── TC-9: Y 선택 시 order_no와 상태가 뷰에 전달된다 ─────────────────────────
 
-def test_reserve_shows_order_no_and_status_on_success(reserve_ctrl, view):
-    view.set_inputs(("sample-1", "홍길동", 5), "Y")
+def test_reserve_shows_order_no_and_status_on_success(reserve_ctrl, sample_model, view):
+    sample = sample_model.add("실리콘 웨이퍼", 5.0, 0.95)
+    view.set_inputs((sample["id"], "홍길동", 5), "Y")
     reserve_ctrl.run()
     assert view.last_order_no is not None
     assert re.match(r"ORD-\d{8}-\d{4}", view.last_order_no)
     assert view.last_status == "RESERVED"
+
+
+# ── TC-10: 존재하지 않는 시료 ID → 주문 미생성 + 에러 표시 ─────────────────
+
+def test_reserve_shows_error_for_nonexistent_sample(reserve_ctrl, order_model, view):
+    view.set_inputs(("S-999", "홍길동", 5), "Y")
+    reserve_ctrl.run()
+    assert len(order_model.get_reserved()) == 0
+    assert view.last_error is not None
+    assert "시료" in view.last_error
 
 
 # ── TC-2: 승인/거절 메뉴 진입 시 RESERVED 목록 표시 ──────────────────────────

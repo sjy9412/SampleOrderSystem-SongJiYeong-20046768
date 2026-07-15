@@ -28,7 +28,7 @@ def create_app(view_type: str = "table") -> MainController:
     order_view      = OrderView(order_model)
 
     sample_ctrl         = SampleController(sample_model, inventory_model, SampleView(sample_model))
-    reserve_ctrl        = ReserveController(order_model, order_view)
+    reserve_ctrl        = ReserveController(order_model, sample_model, order_view)
     approve_reject_ctrl = ApproveRejectController(order_model, inventory_model, production_line, order_view)
     monitoring_ctrl     = MonitoringController(order_model, inventory_model, sample_model, MonitoringView())
     production_ctrl     = ProductionController(production_line, ProductionView(production_line))
