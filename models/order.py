@@ -40,5 +40,8 @@ class OrderModel(ObservableModel):
     def set_producing(self, order_id: str) -> dict:
         return self._transition(order_id, "RESERVED", "PRODUCING")
 
+    def confirm_production(self, order_id: str) -> dict:
+        return self._transition(order_id, "PRODUCING", "CONFIRMED")
+
     def release(self, order_id: str) -> dict:
         return self._transition(order_id, "CONFIRMED", "RELEASE")
