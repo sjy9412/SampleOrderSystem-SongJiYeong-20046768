@@ -1,3 +1,4 @@
+import re
 import pytest
 from models.order import OrderModel
 from models.inventory import InventoryModel
@@ -29,6 +30,10 @@ class OrderViewStub:
         self._inputs = iter([])
         self.shown_orders = []
         self.stock_insufficient_shown = False
+        self.confirmation_shown = False
+        self.last_order_no = None
+        self.last_status = None
+        self.cancelled = False
 
     def set_inputs(self, *values):
         self._inputs = iter(values)
@@ -51,6 +56,13 @@ class OrderViewStub:
     def get_title_input(self): return ""
     def get_id_input(self, action): return ""
     def on_model_changed(self, event): pass
+    def show_order_confirmation(self, sample_id, customer_name, quantity):
+        self.confirmation_shown = True
+    def get_confirm_yn(self): return self._next()
+    def show_reserve_success(self, order_no, status):
+        self.last_order_no = order_no
+        self.last_status = status
+    def show_reserve_cancelled(self): self.cancelled = True
 
 
 @pytest.fixture
@@ -86,7 +98,7 @@ def approve_reject_ctrl(order_model, inventory_model, production_line, view):
 # ── TC-1: 주문 접수 → RESERVED 주문 생성 ──────────────────────────────────────
 
 def test_reserve_creates_reserved_order(reserve_ctrl, order_model, view):
-    view.set_inputs("1", ("sample-1", "홍길동", 5), "0")
+    view.set_inputs(("sample-1", "홍길동", 5), "Y")
     reserve_ctrl.run()
 
     orders = order_model.get_reserved()
@@ -95,6 +107,33 @@ def test_reserve_creates_reserved_order(reserve_ctrl, order_model, view):
     assert orders[0]["customer_name"] == "홍길동"
     assert orders[0]["quantity"] == 5
     assert orders[0]["status"] == "RESERVED"
+
+
+# ── TC-7: 확인 패널이 표시된다 ───────────────────────────────────────────────
+
+def test_reserve_shows_confirmation_before_reserving(reserve_ctrl, view):
+    view.set_inputs(("sample-1", "홍길동", 5), "Y")
+    reserve_ctrl.run()
+    assert view.confirmation_shown is True
+
+
+# ── TC-8: N 선택 시 주문이 생성되지 않는다 ──────────────────────────────────
+
+def test_reserve_cancels_on_n(reserve_ctrl, order_model, view):
+    view.set_inputs(("sample-1", "홍길동", 5), "N")
+    reserve_ctrl.run()
+    assert len(order_model.get_reserved()) == 0
+    assert view.cancelled is True
+
+
+# ── TC-9: Y 선택 시 order_no와 상태가 뷰에 전달된다 ─────────────────────────
+
+def test_reserve_shows_order_no_and_status_on_success(reserve_ctrl, view):
+    view.set_inputs(("sample-1", "홍길동", 5), "Y")
+    reserve_ctrl.run()
+    assert view.last_order_no is not None
+    assert re.match(r"ORD-\d{8}-\d{4}", view.last_order_no)
+    assert view.last_status == "RESERVED"
 
 
 # ── TC-2: 승인/거절 메뉴 진입 시 RESERVED 목록 표시 ──────────────────────────

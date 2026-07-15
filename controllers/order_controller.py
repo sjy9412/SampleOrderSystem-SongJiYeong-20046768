@@ -8,16 +8,14 @@ class ReserveController:
         self._view = view
 
     def run(self) -> None:
-        while True:
-            self._view.show_reserve_menu()
-            choice = self._view.get_menu_choice()
-            if choice == "0":
-                break
-            elif choice == "1":
-                self._handle_reserve()
-            else:
-                self._view.show_invalid_input()
+        self._handle_reserve()
 
     def _handle_reserve(self) -> None:
         sample_id, customer_name, quantity = self._view.get_order_input()
-        self._order.reserve(sample_id, customer_name, quantity)
+        self._view.show_order_confirmation(sample_id, customer_name, quantity)
+        yn = self._view.get_confirm_yn()
+        if yn.upper() == "Y":
+            order = self._order.reserve(sample_id, customer_name, quantity)
+            self._view.show_reserve_success(order["order_no"], order["status"])
+        else:
+            self._view.show_reserve_cancelled()

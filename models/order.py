@@ -1,4 +1,5 @@
 from __future__ import annotations
+from datetime import date
 from models.base import ObservableModel, ModelEvent, EventType
 from db import json_store as store
 
@@ -6,8 +7,19 @@ from db import json_store as store
 class OrderModel(ObservableModel):
     COLLECTION = "orders"
 
+    def _generate_order_no(self) -> str:
+        today = date.today().strftime("%Y%m%d")
+        prefix = f"ORD-{today}-"
+        existing = [
+            o["order_no"] for o in store.read_all(self.COLLECTION)
+            if o.get("order_no", "").startswith(prefix)
+        ]
+        seq = max((int(n.split("-")[2]) for n in existing), default=0) + 1
+        return f"{prefix}{seq:04d}"
+
     def reserve(self, sample_id: str, customer_name: str, quantity: int) -> dict:
         record = store.create(self.COLLECTION, {
+            "order_no": self._generate_order_no(),
             "sample_id": sample_id,
             "customer_name": customer_name,
             "quantity": quantity,

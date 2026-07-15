@@ -87,5 +87,35 @@ class OrderView:
     def get_id_input(self, action: str) -> str:
         return prompt_input(f"{action} ID:")
 
+    def show_order_confirmation(self, sample_id: str, customer_name: str, quantity: int) -> None:
+        from rich.panel import Panel
+        from views.display import console
+        body = (
+            f"  시료 ID:  [bold]{sample_id}[/bold]\n"
+            f"  고객명:   [bold]{customer_name}[/bold]\n"
+            f"  수량:     [bold]{quantity} ea[/bold]"
+        )
+        console.print(Panel(
+            body,
+            title="[bold cyan]주문 확인[/bold cyan]",
+            border_style="bright_black",
+            expand=False,
+            padding=(0, 1),
+        ))
+
+    def get_confirm_yn(self) -> str:
+        console.print("\n  [bold yellow]예약 접수 하시겠습니까? (Y/N)[/bold yellow] ", end="")
+        return input().strip()
+
+    def show_reserve_success(self, order_no: str, status: str) -> None:
+        from views.display import _STATUS_STYLES
+        style = _STATUS_STYLES.get(status, "")
+        success("예약 접수 완료")
+        console.print(f"  주문번호: [bold cyan]{order_no}[/bold cyan]")
+        console.print(f"  현재 상태: [{style}]{status}[/{style}]")
+
+    def show_reserve_cancelled(self) -> None:
+        info("예약 접수가 취소되었습니다.")
+
     def on_model_changed(self, event: ModelEvent) -> None:
         pass

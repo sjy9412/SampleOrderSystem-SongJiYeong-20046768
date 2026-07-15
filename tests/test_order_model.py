@@ -1,3 +1,4 @@
+import re
 import pytest
 from models.order import OrderModel
 from models.base import ModelEvent, EventType
@@ -146,3 +147,18 @@ def test_release_only_works_on_confirmed_order(model):
     order = model.reserve("sample-1", "홍길동", 10)
     with pytest.raises(ValueError):
         model.release(order["id"])
+
+
+# ── order_no 생성 ─────────────────────────────────────────────────────────────
+
+def test_reserve_generates_order_no_with_format(model):
+    order = model.reserve("sample-1", "홍길동", 10)
+    assert re.match(r"ORD-\d{8}-\d{4}", order["order_no"])
+
+
+def test_reserve_sequential_order_no_on_same_day(model):
+    o1 = model.reserve("sample-1", "홍길동", 5)
+    o2 = model.reserve("sample-2", "이순신", 3)
+    seq1 = int(o1["order_no"].split("-")[2])
+    seq2 = int(o2["order_no"].split("-")[2])
+    assert seq2 == seq1 + 1
