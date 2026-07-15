@@ -34,11 +34,17 @@ def create_app(view_type: str = "table") -> MainController:
     production_ctrl     = ProductionController(production_line, ProductionView(production_line))
     release_ctrl        = ReleaseController(order_model, ReleaseView(order_model))
 
-    return MainController([
-        sample_ctrl,         # 1. 시료 관리
-        reserve_ctrl,        # 2. 시료 주문
-        approve_reject_ctrl, # 3. 주문 승인/거절
-        monitoring_ctrl,     # 4. 모니터링
-        production_ctrl,     # 5. 생산라인 조회
-        release_ctrl,        # 6. 출고 처리
-    ])
+    return MainController(
+        [
+            sample_ctrl,         # 1. 시료 관리
+            reserve_ctrl,        # 2. 시료 주문
+            approve_reject_ctrl, # 3. 주문 승인/거절
+            monitoring_ctrl,     # 4. 모니터링
+            production_ctrl,     # 5. 생산라인 조회
+            release_ctrl,        # 6. 출고 처리
+        ],
+        sample_model=sample_model,
+        inventory_model=inventory_model,
+        order_model=order_model,
+        production_line=production_line,
+    )

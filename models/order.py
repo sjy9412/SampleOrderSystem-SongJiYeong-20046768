@@ -16,6 +16,9 @@ class OrderModel(ObservableModel):
         self._notify(ModelEvent(EventType.ADDED, record))
         return record
 
+    def get_all(self) -> list[dict]:
+        return store.read_all(self.COLLECTION)
+
     def get_reserved(self) -> list[dict]:
         return store.read_all(self.COLLECTION, status="RESERVED")
 

@@ -1,211 +1,168 @@
-# TDD Plan — 수량 단위(ea) · 시간 단위(min) 표시
+# TDD Plan — 메인화면 시스템 현황 대시보드 + 선택 프롬프트
 
-## Goal
+## 목표
 
-View 레이어의 레이블·값에 단위를 명시한다.
-
-| 위치 | 현재 | 변경 후 |
-|------|------|---------|
-| `sample_view.get_sample_input()` 프롬프트 | `"평균 생산시간(시간):"` | `"평균 생산시간(min):"` |
-| `sample_view.show_samples()` 컬럼 헤더 | `"평균 생산시간(h)"` | `"평균 생산시간(min)"` |
-| `order_view.get_order_input()` 프롬프트 | `"수량:"` | `"수량(ea):"` |
-| `order_view.show_orders()` 수량 값 | `"5"` | `"5 ea"` |
-| `production_view.show_current()` 총 생산시간 값 | `"2.5h"` | `"2.5 min"` |
-| `production_view.show_queue()` 수량 값 | `"5"` | `"5 ea"` |
+1. `prompt_choice()` 출력을 `선택 >` 형식으로 변경
+2. 메인 메뉴 루프마다 **시스템 현황 패널** 표시
+   - 헤더: `시스템 현황  YYYY-MM-DD HH:MM:SS`
+   - 내용: `등록 시료 N종   총 재고 Nea   전체 주문 N건   생산라인 N건 대기`
 
 ---
 
-## 작성할 테스트
+## Cycle 1 — `prompt_choice` 프롬프트 형식 (`선택 >`)
 
-### `tests/test_sample_view.py` (신규)
+### 작성할 테스트 (`tests/test_display.py` 신규)
 
 ```python
-import pytest
-from models.sample import SampleModel
-from views.sample_view import SampleView
-
-
-@pytest.fixture(autouse=True)
-def clean_db():
-    from db import json_store as store
-    store.reset("samples")
-    yield
-    store.reset("samples")
-
-
-@pytest.fixture
-def view():
-    model = SampleModel()
-    return SampleView(model)
-
-
-# TC-1: show_samples 컬럼 헤더에 "min" 포함
-def test_show_samples_uses_min_unit_in_column_header(view, capsys):
-    samples = [{"id": "S-001", "name": "TestChip", "avg_production_time": 2.5, "yield_rate": 0.95}]
-    view.show_samples(samples, {})
-    output = capsys.readouterr().out
-    assert "min" in output
-
-
-# TC-2: get_sample_input 프롬프트에 "min" 포함
-def test_get_sample_input_prompt_contains_min(view, capsys, monkeypatch):
-    inputs = iter(["TestChip", "2.5", "0.95"])
-    monkeypatch.setattr("builtins.input", lambda: next(inputs))
-    view.get_sample_input()
-    output = capsys.readouterr().out
-    assert "min" in output
+def test_prompt_choice_shows_arrow_format(capsys, monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda: "1")
+    from views.display import prompt_choice
+    prompt_choice()
+    out = capsys.readouterr().out
+    assert "선택 >" in out
 ```
 
-### `tests/test_order_view.py` (신규)
+### 예상 실패 이유
+현재 `prompt_choice`는 `"선택"` 뒤에 `>`를 출력하지 않으므로 assertion 실패.
+
+### 구현 방향 (`views/display.py`)
 
 ```python
-import pytest
-from models.order import OrderModel
-from views.order_view import OrderView
-
-
-@pytest.fixture(autouse=True)
-def clean_db():
-    from db import json_store as store
-    store.reset("orders")
-    yield
-    store.reset("orders")
-
-
-@pytest.fixture
-def view():
-    model = OrderModel()
-    return OrderView(model)
-
-
-# TC-3: show_orders 수량 값에 "ea" 포함
-def test_show_orders_displays_ea_unit(view, capsys):
-    orders = [{"id": "O-001", "customer_name": "홍길동", "quantity": 5, "status": "RESERVED"}]
-    view.show_orders(orders)
-    output = capsys.readouterr().out
-    assert "ea" in output
-
-
-# TC-4: get_order_input 프롬프트에 "ea" 포함
-def test_get_order_input_prompt_contains_ea(view, capsys, monkeypatch):
-    inputs = iter(["S-001", "홍길동", "5"])
-    monkeypatch.setattr("builtins.input", lambda: next(inputs))
-    view.get_order_input()
-    output = capsys.readouterr().out
-    assert "ea" in output
-```
-
-### `tests/test_production_view.py` (신규)
-
-```python
-import pytest
-from models.production_line import ProductionLine
-from views.production_view import ProductionView
-
-
-@pytest.fixture(autouse=True)
-def clean_db():
-    from db import json_store as store
-    store.reset("orders")
-    store.reset("samples")
-    store.reset("production_queue")
-    yield
-    store.reset("orders")
-    store.reset("samples")
-    store.reset("production_queue")
-
-
-@pytest.fixture
-def view():
-    model = ProductionLine()
-    return ProductionView(model)
-
-
-# TC-5: show_current 총 생산시간 값에 "min" 포함
-def test_show_current_displays_min_unit(view, capsys):
-    info_data = {
-        "order_id": "O-001",
-        "sample_name": "TestChip",
-        "quantity": 5,
-        "actual_qty": 6,
-        "total_time": 12.0,
-    }
-    view.show_current(info_data)
-    output = capsys.readouterr().out
-    assert "min" in output
-
-
-# TC-6: show_queue 수량 값에 "ea" 포함
-def test_show_queue_displays_ea_unit(view, capsys):
-    items = [{
-        "position": 1,
-        "order_id": "O-001",
-        "sample_name": "TestChip",
-        "customer_name": "홍길동",
-        "quantity": 5,
-    }]
-    view.show_queue(items)
-    output = capsys.readouterr().out
-    assert "ea" in output
+def prompt_choice(label: str = "선택") -> str:
+    console.print(f"\n  [bold cyan]{label} >[/bold cyan] ", end="")
+    return input().strip()
 ```
 
 ---
 
-## 예상 실패 이유
+## Cycle 2 — 시스템 현황 대시보드
 
-| 테스트 | 실패 원인 |
-|--------|-----------|
-| TC-1 | 컬럼 키가 `"평균 생산시간(h)"` → "min" 없음 |
-| TC-2 | 프롬프트가 `"평균 생산시간(시간):"` → "min" 없음 |
-| TC-3 | 수량이 `str(o["quantity"])` → "ea" 없음 |
-| TC-4 | 프롬프트가 `"수량:"` → "ea" 없음 |
-| TC-5 | 총 생산시간이 `f"{total_time:.1f}h"` → "min" 없음 |
-| TC-6 | 수량이 `str(item["quantity"])` → "ea" 없음 |
-
----
-
-## 구현 방향 (최소한의 변경)
-
-### `views/sample_view.py`
-
-```python
-# get_sample_input()
-avg_time = float(prompt_input("평균 생산시간(min):"))    # "(시간)" → "(min)"
-
-# show_samples()
-"평균 생산시간(min)": f"{s['avg_production_time']:.1f}",  # "(h)" → "(min)"
-```
-
-### `views/order_view.py`
-
-```python
-# get_order_input()
-quantity = int(prompt_input("수량(ea):"))               # "수량:" → "수량(ea):"
-
-# show_orders()
-"수량": f"{o['quantity']} ea",                          # str → "N ea"
-```
-
-### `views/production_view.py`
-
-```python
-# show_current()
-t.add_row("총 생산시간", f"{info_data['total_time']:.1f} min")  # "h" → "min"
-
-# show_queue()
-"수량": f"{item['quantity']} ea",                       # str → "N ea"
-```
-
----
-
-## 영향 범위
+### 영향 파일
 
 | 파일 | 변경 내용 |
-|------|-----------|
-| `tests/test_sample_view.py` | 신규: TC-1, TC-2 |
-| `tests/test_order_view.py` | 신규: TC-3, TC-4 |
-| `tests/test_production_view.py` | 신규: TC-5, TC-6 |
-| `views/sample_view.py` | 프롬프트·컬럼 레이블 "min" 적용 |
-| `views/order_view.py` | 프롬프트 "ea", 수량 값 "N ea" |
-| `views/production_view.py` | 총 생산시간 "min", 수량 값 "N ea" |
-| `docs/PRD.md` | 이미 반영 완료 |
+|------|----------|
+| `models/order.py` | `get_all()` 메서드 추가 (전체 주문 수 조회용) |
+| `controllers/main_controller.py` | 생성자에 모델 4개 키워드 인수 추가, 루프마다 `_show_dashboard()` 호출 |
+| `app.py` | `MainController` 생성 시 모델 전달 |
+
+### 작성할 테스트 (`tests/test_main_controller.py` — 테스트 추가)
+
+```python
+class FakeSampleModel:
+    def get_all(self): return [{"id": "S-001"}, {"id": "S-002"}]
+
+class FakeInventoryModel:
+    def get_all_stocks(self): return [{"quantity": 10}, {"quantity": 5}]
+
+class FakeOrderModel:
+    def get_all(self): return [{"id": "o1"}, {"id": "o2"}, {"id": "o3"}]
+
+class FakeProductionLine:
+    def get_queue(self): return [{"order_id": "o1"}]
+
+
+def test_dashboard_shows_sample_count(capsys):
+    ctrl = MainController(
+        [],
+        sample_model=FakeSampleModel(),
+        inventory_model=FakeInventoryModel(),
+        order_model=FakeOrderModel(),
+        production_line=FakeProductionLine(),
+    )
+    with patch("builtins.input", return_value="0"):
+        ctrl.run()
+    assert "2종" in capsys.readouterr().out
+
+
+def test_dashboard_shows_total_stock(capsys):
+    ctrl = MainController(
+        [],
+        sample_model=FakeSampleModel(),
+        inventory_model=FakeInventoryModel(),
+        order_model=FakeOrderModel(),
+        production_line=FakeProductionLine(),
+    )
+    with patch("builtins.input", return_value="0"):
+        ctrl.run()
+    assert "15ea" in capsys.readouterr().out
+
+
+def test_dashboard_shows_order_count(capsys):
+    ctrl = MainController(
+        [],
+        sample_model=FakeSampleModel(),
+        inventory_model=FakeInventoryModel(),
+        order_model=FakeOrderModel(),
+        production_line=FakeProductionLine(),
+    )
+    with patch("builtins.input", return_value="0"):
+        ctrl.run()
+    assert "3건" in capsys.readouterr().out
+
+
+def test_dashboard_shows_production_queue_count(capsys):
+    ctrl = MainController(
+        [],
+        sample_model=FakeSampleModel(),
+        inventory_model=FakeInventoryModel(),
+        order_model=FakeOrderModel(),
+        production_line=FakeProductionLine(),
+    )
+    with patch("builtins.input", return_value="0"):
+        ctrl.run()
+    assert "1건 대기" in capsys.readouterr().out
+```
+
+### 예상 실패 이유
+`MainController.__init__`가 키워드 인수를 받지 않아 `TypeError`.
+
+### 구현 방향
+
+**`models/order.py` 추가:**
+```python
+def get_all(self) -> list[dict]:
+    return store.read_all(self.COLLECTION)
+```
+
+**`controllers/main_controller.py` 변경:**
+```python
+def __init__(self, sub_controllers, *, sample_model=None,
+             inventory_model=None, order_model=None, production_line=None):
+    ...
+
+def _show_dashboard(self):
+    from datetime import datetime
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    sample_count = len(self._sample_model.get_all()) if self._sample_model else 0
+    total_stock  = sum(r["quantity"] for r in self._inventory_model.get_all_stocks()) \
+                   if self._inventory_model else 0
+    order_count  = len(self._order_model.get_all()) if self._order_model else 0
+    queue_count  = len(self._production_line.get_queue()) if self._production_line else 0
+    # Rich Panel 로 출력
+    ...
+
+def run(self):
+    console.print(BANNER)
+    while True:
+        self._show_dashboard()      # ← 추가
+        show_menu_panel(...)
+        ...
+```
+
+**`app.py` 변경:**
+```python
+return MainController(
+    [...],
+    sample_model=sample_model,
+    inventory_model=inventory_model,
+    order_model=order_model,
+    production_line=production_line,
+)
+```
+
+---
+
+## 기존 테스트 호환성
+
+`MainController([])` 처럼 모델 없이 생성하는 기존 테스트는  
+키워드 인수의 기본값이 `None`이므로 깨지지 않음.

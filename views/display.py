@@ -88,7 +88,7 @@ def show_menu_panel(title: str, items: list[tuple[str, str]]) -> None:
 
 
 def prompt_choice(label: str = "선택") -> str:
-    console.print(f"\n  [bold cyan]{label}[/bold cyan] ", end="")
+    console.print(f"\n  [bold cyan]{label} >[/bold cyan] ", end="")
     return input().strip()
 
 
