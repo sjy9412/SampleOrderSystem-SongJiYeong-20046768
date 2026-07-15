@@ -1,141 +1,182 @@
-# STEP 6 — ProductionLine 모델 TDD Plan
+# STEP 7 — 생산 라인 View / Controller TDD Plan
 
-## 목표 (Goal)
+## 목표
 
-`models/production_line.py` 구현 및 `tests/test_production_line.py` 작성.
-
-FIFO 생산 큐를 DB(`production_queue` 컬렉션)로 관리하고,
-생산량 산정 및 완료 처리(재고 증가 + 주문 CONFIRMED 전환)를 담당한다.
+`ProductionController` + `ProductionView` 구현.  
+메뉴 1 → 현재 생산 현황 표시, 메뉴 2 → 대기 큐 목록 표시.
 
 ---
 
-## 부가 변경: OrderModel
+## 변경 파일
 
-`complete()` 내부에서 PRODUCING → CONFIRMED 전환이 필요하다.
-현재 `OrderModel.confirm()`은 RESERVED → CONFIRMED만 지원하므로
-`OrderModel`에 `confirm_production(order_id)` 메서드를 추가한다.
-(메서드 1개 추가, 기존 로직 변경 없음)
-
----
-
-## 구현 파일
-
-| 파일 | 변경 종류 |
-|------|-----------|
-| `models/order.py` | `confirm_production()` 메서드 추가 |
-| `models/production_line.py` | 신규 생성 |
-| `tests/test_production_line.py` | 신규 생성 |
+| 파일 | 유형 |
+|------|------|
+| `tests/test_production_controller.py` | 신규 (테스트) |
+| `views/production_view.py` | 신규 |
+| `controllers/production_controller.py` | 신규 |
+| `models/production_line.py` | 수정 (메서드 2개 추가) |
 
 ---
 
-## 생산량 산정 공식
+## 설계 결정
 
-```
-부족분      = 주문 수량 - 현재 재고
-실 생산량   = ceil(부족분 / 수율)
-총 생산시간 = 평균 생산시간 × 실 생산량
-```
+`ProductionController(production_line, view)` — PLAN.md STEP 10 API 그대로 유지.  
+현황 조회에 필요한 시료명·실생산량·총생산시간 계산 책임은 `ProductionLine`에 새 메서드 2개로 위임.
 
----
+| 메서드 | 반환 |
+|--------|------|
+| `ProductionLine.get_current_info()` | `dict \| None` — order_id, sample_name, quantity, actual_qty, total_time |
+| `ProductionLine.get_queue_info()` | `list[dict]` — position, order_id, sample_name, customer_name, quantity |
 
-## 테스트 케이스 목록
-
-### calculate_production (순수 계산 — DB 불필요)
-
-| 테스트 이름 | 검증 내용 |
-|-------------|-----------|
-| `test_calculate_production_returns_correct_values` | shortage=90, yield=0.9, avg_time=2.0 → actual_qty=100, total_time=200.0 |
-| `test_calculate_production_uses_ceil` | shortage=10, yield=0.3 → ceil(10/0.3)=34 |
-
-### enqueue / get_queue / get_current
-
-| 테스트 이름 | 검증 내용 |
-|-------------|-----------|
-| `test_enqueue_adds_order_to_queue` | enqueue 후 get_queue() 에 해당 order_id 포함 |
-| `test_get_queue_returns_orders_in_fifo_order` | enqueue 두 건 → get_queue() 순서 FIFO 보장 |
-| `test_get_current_returns_first_in_queue` | enqueue 두 건 → get_current() 첫 번째 항목 반환 |
-| `test_get_current_returns_none_when_queue_is_empty` | 빈 큐 → None |
-
-### complete
-
-| 테스트 이름 | 검증 내용 |
-|-------------|-----------|
-| `test_complete_increases_inventory` | complete 후 재고가 실 생산량만큼 증가 |
-| `test_complete_confirms_order` | complete 후 주문 상태 CONFIRMED |
-| `test_complete_removes_order_from_queue` | complete 후 get_queue() 에서 해제됨 |
+두 메서드는 기존 `_order_model`, `_inventory_model`, `_sample_model`을 활용.  
+STEP 6 기존 테스트는 영향 없음.
 
 ---
 
-## 구현 방향 (최소한의 코드)
+## TDD 사이클
+
+### Cycle 1 — 현재 생산 현황 조회 (주문 있음)
+
+**Goal**: 메뉴 1 선택 시 `view.show_current()`에 주문 ID·시료명·수량·실생산량·총생산시간이 전달된다.
 
 ```python
-# models/production_line.py
+def test_current_shows_production_info(
+    controller, production_line, order_model, inventory_model, sample_model, view
+):
+    sample = sample_model.add("AAA", 2.0, 0.8)
+    inventory_model.increase(sample["id"], 3)
+    order = order_model.reserve(sample["id"], "홍길동", 10)
+    order_model.set_producing(order["id"])
+    production_line.enqueue(order["id"])
 
-import math
-from db import json_store as store
-from models.base import ObservableModel
+    view.set_inputs("1", "0")
+    controller.run()
 
-COLLECTION = "production_queue"
+    # 부족분=7, 실생산량=ceil(7/0.8)=9, 총시간=2.0×9=18.0
+    assert view.shown_current["order_id"] == order["id"]
+    assert view.shown_current["sample_name"] == "AAA"
+    assert view.shown_current["quantity"] == 10
+    assert view.shown_current["actual_qty"] == 9
+    assert view.shown_current["total_time"] == 18.0
+```
 
+**예상 실패 이유**: `ProductionController`, `ProductionView`, `ProductionLine.get_current_info()` 미존재 → ImportError
 
-class ProductionLine(ObservableModel):
+---
 
-    def __init__(self, order_model, inventory_model, sample_model):
-        super().__init__()
-        self._order_model = order_model
-        self._inventory_model = inventory_model
-        self._sample_model = sample_model
+### Cycle 2 — 현재 생산 현황 조회 (큐 비어있음)
 
-    def enqueue(self, order_id: str) -> dict:
-        return store.create(COLLECTION, {"order_id": order_id})
+**Goal**: 큐가 비어있을 때 메뉴 1 선택 시 `view.show_no_current()`가 호출된다.
 
-    def get_queue(self) -> list[dict]:
-        items = store.read_all(COLLECTION)
-        return sorted(items, key=lambda x: x["created_at"])
+```python
+def test_current_when_empty_shows_no_current(controller, view):
+    view.set_inputs("1", "0")
+    controller.run()
 
-    def get_current(self) -> dict | None:
-        queue = self.get_queue()
-        return queue[0] if queue else None
+    assert view.shown_current is None
+    assert view.no_current_shown is True
+```
 
-    def calculate_production(
-        self, shortage: int, yield_rate: float, avg_time: float
-    ) -> tuple[int, float]:
-        actual_qty = math.ceil(shortage / yield_rate)
-        total_time = avg_time * actual_qty
-        return actual_qty, total_time
+**예상 실패 이유**: 동일
 
-    def complete(self, order_id: str) -> None:
-        order = self._order_model.get_by_id(order_id)
+---
+
+### Cycle 3 — 대기 주문 목록 조회
+
+**Goal**: 메뉴 2 선택 시 enqueue된 주문들이 순번과 함께 `view.show_queue()`로 전달된다.
+
+```python
+def test_queue_shows_waiting_orders_in_order(
+    controller, production_line, order_model, sample_model, view
+):
+    sample = sample_model.add("AAA", 2.0, 0.8)
+    order1 = order_model.reserve(sample["id"], "홍길동", 5)
+    order2 = order_model.reserve(sample["id"], "이순신", 3)
+    order_model.set_producing(order1["id"])
+    order_model.set_producing(order2["id"])
+    production_line.enqueue(order1["id"])
+    production_line.enqueue(order2["id"])
+
+    view.set_inputs("2", "0")
+    controller.run()
+
+    assert len(view.shown_queue) == 2
+    assert view.shown_queue[0]["position"] == 1
+    assert view.shown_queue[0]["order_id"] == order1["id"]
+    assert view.shown_queue[0]["sample_name"] == "AAA"
+    assert view.shown_queue[0]["customer_name"] == "홍길동"
+    assert view.shown_queue[1]["position"] == 2
+    assert view.shown_queue[1]["customer_name"] == "이순신"
+```
+
+**예상 실패 이유**: 동일
+
+---
+
+## 구현 방향 (GREEN 단계)
+
+### `models/production_line.py` 추가 메서드
+
+```python
+def get_current_info(self) -> dict | None:
+    current = self.get_current()
+    if current is None:
+        return None
+    order = self._order_model.get_by_id(current["order_id"])
+    sample = self._sample_model.get_by_id(order["sample_id"])
+    stock = self._inventory_model.get_stock(order["sample_id"])
+    shortage = max(0, order["quantity"] - stock)
+    actual_qty, total_time = self.calculate_production(
+        shortage, sample["yield_rate"], sample["avg_production_time"]
+    )
+    return {
+        "order_id": order["id"],
+        "sample_name": sample["name"],
+        "quantity": order["quantity"],
+        "actual_qty": actual_qty,
+        "total_time": total_time,
+    }
+
+def get_queue_info(self) -> list[dict]:
+    result = []
+    for i, item in enumerate(self.get_queue(), 1):
+        order = self._order_model.get_by_id(item["order_id"])
         sample = self._sample_model.get_by_id(order["sample_id"])
-        current_stock = self._inventory_model.get_stock(order["sample_id"])
-        shortage = order["quantity"] - current_stock
-        actual_qty, _ = self.calculate_production(
-            shortage, sample["yield_rate"], sample["avg_production_time"]
-        )
-        self._inventory_model.increase(order["sample_id"], actual_qty)
-        self._order_model.confirm_production(order_id)
-        for item in store.read_all(COLLECTION, order_id=order_id):
-            store.delete(COLLECTION, item["id"])
+        result.append({
+            "position": i,
+            "order_id": order["id"],
+            "sample_name": sample["name"],
+            "customer_name": order["customer_name"],
+            "quantity": order["quantity"],
+        })
+    return result
 ```
+
+### `controllers/production_controller.py`
 
 ```python
-# models/order.py 에 추가
-def confirm_production(self, order_id: str) -> dict:
-    return self._transition(order_id, "PRODUCING", "CONFIRMED")
+class ProductionController:
+    def __init__(self, production_line, view) -> None: ...
+    def run(self) -> None: ...              # 메뉴 루프 (1/2/0)
+    def _handle_current(self) -> None: ... # get_current_info() → show_current / show_no_current
+    def _handle_queue(self) -> None: ...   # get_queue_info() → show_queue
 ```
 
----
+### `views/production_view.py`
 
-## 예상 실패 이유
-
-테스트 작성 시 `models/production_line.py` 가 존재하지 않으므로
-`ImportError` 로 즉시 실패한다.
+```python
+class ProductionView:
+    MENU = "\n[생산 라인]\n1. 생산 현황 조회\n2. 대기 주문 목록\n0. 뒤로\n"
+    def show_current(self, info: dict) -> None: ...
+    def show_no_current(self) -> None: ...
+    def show_queue(self, items: list[dict]) -> None: ...
+```
 
 ---
 
 ## 체크리스트
 
 - [ ] Plan.md 사용자 승인
-- [ ] `tests/test_production_line.py` 작성 → RED 확인
-- [ ] `models/production_line.py` + `OrderModel.confirm_production()` 구현 → GREEN 확인
+- [ ] `tests/test_production_controller.py` 작성 → RED 확인
+- [ ] `models/production_line.py` 메서드 추가 + `views/production_view.py` + `controllers/production_controller.py` 구현 → GREEN 확인
 - [ ] REVIEW → 커밋
