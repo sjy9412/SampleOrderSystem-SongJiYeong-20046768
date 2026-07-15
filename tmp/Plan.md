@@ -1,140 +1,156 @@
-# TDD Plan — STEP 9: 출고 처리 View / Controller
+# TDD Plan — STEP 10: 메인 메뉴 통합
 
 ## 목표 (Goal)
 
-CONFIRMED 상태 주문을 출고(RELEASE)로 전환하는 `ReleaseController`와 `ReleaseView`를 구현한다.
+`MainController`와 `create_app()`을 구현해, 모든 하위 컨트롤러를 하나의 메인 루프로 통합한다.
 
 **구현 파일**
-- `views/release_view.py`
-- `controllers/release_controller.py`
-- `tests/test_release_controller.py`
+- `controllers/main_controller.py` (신규)
+- `app.py` (구현 완성)
+- `tests/test_main_controller.py` (신규)
 
-**메뉴 구성**
+**메인 메뉴**
 ```
-[출고 처리]
-1. 출고 가능 주문 목록 (CONFIRMED)
-2. 출고 처리
-0. 뒤로
-```
-
-**핵심 로직**
-```
-def _handle_release(order_id):
-    order_model.release(order_id)    # CONFIRMED → RELEASE
+[메인 메뉴]
+1. 시료 관리
+2. 주문 (접수 / 승인 / 거절)
+3. 모니터링
+4. 출고 처리
+5. 생산 라인
+0. 종료
 ```
 
 ---
 
-## 테스트 케이스
+## 테스트 케이스 (`tests/test_main_controller.py`)
 
-### TC-1: 메뉴 선택 1 → CONFIRMED 주문 목록 표시
-
-```python
-def test_list_confirmed_orders_shows_confirmed_orders():
-    # CONFIRMED 주문 2건 + RESERVED 주문 1건 세팅
-    # 메뉴 선택 "1" → "0"
-    # view.shown_orders 에 CONFIRMED 주문만 2건 포함됨을 검증
-```
-
-예상 실패 이유: `ReleaseController`, `ReleaseView` 미존재 → `ModuleNotFoundError`
-
-### TC-2: 메뉴 선택 2 → order_id 입력 → CONFIRMED → RELEASE 전환
+### TC-1: "0" 입력 시 루프 종료
 
 ```python
-def test_release_transitions_confirmed_order_to_release():
-    # CONFIRMED 주문 1건 세팅
-    # 메뉴 선택 "2" → order_id → "0"
-    # 주문 상태가 RELEASE 임을 검증
+def test_exits_on_zero():
+    ctrl = MainController([])
+    with patch("builtins.input", return_value="0"):
+        ctrl.run()  # 반환되면 통과, 무한루프면 타임아웃
 ```
 
-예상 실패 이유: `ReleaseController._handle_release()` 미구현
+예상 실패 이유: `MainController` 미존재 → `ImportError`
 
-### TC-3: 존재하지 않거나 CONFIRMED 아닌 주문 ID 출고 시도 → 오류 표시
+---
+
+### TC-2: "1" 입력 시 첫 번째 sub-controller의 run() 호출
 
 ```python
-def test_release_non_confirmed_order_shows_error():
-    # RESERVED 상태 주문에 대해 release 시도
-    # show_error 가 호출됨을 검증
+class StubController:
+    def __init__(self):
+        self.called = False
+    def run(self):
+        self.called = True
+
+def test_dispatches_to_first_sub_controller():
+    stub = StubController()
+    ctrl = MainController([stub])
+    with patch("builtins.input", side_effect=["1", "0"]):
+        ctrl.run()
+    assert stub.called
 ```
 
-예상 실패 이유: 예외 처리 로직 미구현
+예상 실패 이유: `MainController` 미존재 → `ImportError`
+
+---
+
+### TC-3: 유효하지 않은 입력 시 "잘못된" 메시지 출력
+
+```python
+def test_invalid_input_shows_invalid_message():
+    ctrl = MainController([])
+    output = []
+    with patch("builtins.input", side_effect=["9", "0"]):
+        with patch("builtins.print", side_effect=lambda *a, **k: output.append(" ".join(str(x) for x in a))):
+            ctrl.run()
+    assert any("잘못된" in line for line in output)
+```
+
+예상 실패 이유: `MainController` 미존재 → `ImportError`
+
+---
+
+### TC-4: `create_app()`이 `run()` 메서드를 가진 객체 반환
+
+```python
+def test_create_app_returns_object_with_run():
+    from app import create_app
+    app = create_app()
+    assert hasattr(app, "run") and callable(app.run)
+```
+
+예상 실패 이유: `create_app()` → `NotImplementedError`
 
 ---
 
 ## 구현 방향 (최소 코드)
 
-### `views/release_view.py`
+### `controllers/main_controller.py`
 
 ```python
-class ReleaseView:
+class MainController:
     MENU = (
-        "\n[출고 처리]\n"
-        "1. 출고 가능 주문 목록 (CONFIRMED)\n"
-        "2. 출고 처리\n"
-        "0. 뒤로\n"
+        "\n[메인 메뉴]\n"
+        "1. 시료 관리\n"
+        "2. 주문 (접수 / 승인 / 거절)\n"
+        "3. 모니터링\n"
+        "4. 출고 처리\n"
+        "5. 생산 라인\n"
+        "0. 종료\n"
     )
 
-    def __init__(self, model) -> None:
-        model.subscribe(self)
-
-    def show_menu(self) -> None: print(self.MENU)
-    def get_menu_choice(self) -> str: return input("선택: ").strip()
-    def get_order_id(self, action: str) -> str: return input(f"{action}할 주문 ID: ").strip()
-    def show_orders(self, orders: list[dict]) -> None: ...  # 테이블 출력
-    def show_error(self, message: str) -> None: print(f"[오류] {message}")
-    def show_invalid_input(self) -> None: print("잘못된 입력입니다.")
-    def show_exit(self) -> None: print("뒤로 갑니다.")
-    def get_title_input(self) -> str: return ""
-    def get_id_input(self, action: str) -> str: return ""
-    def on_model_changed(self, event) -> None: pass
-```
-
-### `controllers/release_controller.py`
-
-```python
-class ReleaseController:
-    def __init__(self, order_model, view) -> None:
-        self._order = order_model
-        self._view = view
+    def __init__(self, sub_controllers: list) -> None:
+        self._controllers = sub_controllers
 
     def run(self) -> None:
         while True:
-            self._view.show_menu()
-            choice = self._view.get_menu_choice()
+            print(self.MENU)
+            choice = input("선택: ").strip()
             if choice == "0":
+                print("시스템을 종료합니다.")
                 break
-            elif choice == "1":
-                self._handle_list_confirmed()
-            elif choice == "2":
-                self._handle_release()
+            if choice.isdigit() and 1 <= int(choice) <= len(self._controllers):
+                self._controllers[int(choice) - 1].run()
             else:
-                self._view.show_invalid_input()
+                print("잘못된 입력입니다.")
+```
 
-    def _handle_list_confirmed(self) -> None:
-        orders = self._order.get_by_status("CONFIRMED")
-        self._view.show_orders(orders)
+### `app.py`
 
-    def _handle_release(self) -> None:
-        order_id = self._view.get_order_id("출고")
-        if not order_id:
-            return
-        try:
-            self._order.release(order_id)
-        except (ValueError, KeyError) as e:
-            self._view.show_error(str(e))
+```python
+def create_app(view_type: str = "table"):
+    sample_model    = SampleModel()
+    order_model     = OrderModel()
+    inventory_model = InventoryModel()
+    production_line = ProductionLine(order_model, inventory_model, sample_model)
+
+    sample_ctrl     = SampleController(sample_model, SampleView(sample_model))
+    order_ctrl      = OrderController(order_model, inventory_model, production_line, OrderView(order_model))
+    monitoring_ctrl = MonitoringController(order_model, inventory_model, sample_model, MonitoringView())
+    release_ctrl    = ReleaseController(order_model, ReleaseView(order_model))
+    production_ctrl = ProductionController(production_line, ProductionView(production_line))
+
+    return MainController([
+        sample_ctrl, order_ctrl, monitoring_ctrl, release_ctrl, production_ctrl
+    ])
 ```
 
 ---
 
 ## 모킹 전략
 
-- `db.json_store` 실제 사용 (파일 I/O), `autouse` fixture로 DB 초기화
-- 내부 레이어(OrderModel)는 실제 객체 사용
-- View는 `ReleaseViewStub` 스텁 사용 (화면 I/O 제거)
+- `input()` → `patch("builtins.input")` 으로 대체 (외부 I/O 경계)
+- `print()` → `patch("builtins.print")` 으로 대체 (외부 I/O 경계)
+- sub-controller → `StubController` 스텁 사용 (화면 I/O 제거 목적)
+- `create_app()` 테스트: 실제 객체 조립, `run()` 호출 가능 여부만 검증
 
 ---
 
-## STEP 9 범위 외 사항 (건드리지 않음)
+## STEP 10 범위 외 사항 (건드리지 않음)
 
-- `app.py`, `main.py` 통합은 STEP 10에서 진행
-- 다른 모델/컨트롤러 수정 없음
+- 기존 모델/뷰/컨트롤러 파일 수정 없음
+- `main.py` 수정 없음 (기존 UTF-8 설정 유지)
