@@ -13,7 +13,8 @@
 | DB 영속성 계층 (`db/json_store.py`) | ✅ 완료 |
 | 더미 데이터 생성기 (`db/dummy_generator.py`) | ✅ 완료 |
 | DataMonitor REPL (`db/monitor/`) | ✅ 완료 |
-| Sample / Order / 생산 라인 / 재고 / 메인 메뉴 | ❌ 미구현 |
+| Sample / Order / 생산 라인 / 재고 / 메인 메뉴 | ✅ 완료 |
+| **미해결**: `SampleController` 재고 연동 (`stocks={}` 하드코딩) | ✅ 완료 |
 
 ---
 
@@ -359,16 +360,16 @@ def create_app():
 
 | 단계 | 내용 | 상태 |
 |------|------|------|
-| STEP 1 | Sample 모델 | ⬜ |
-| STEP 2 | 시료 관리 View / Controller | ⬜ |
-| STEP 3 | Order 모델 | ⬜ |
+| STEP 1 | Sample 모델 | ✅ |
+| STEP 2 | 시료 관리 View / Controller | ✅ |
+| STEP 3 | Order 모델 | ✅ |
 | STEP 4 | Inventory 모델 | ✅ |
-| STEP 5 | 주문 승인/거절 View / Controller | ⬜ |
-| STEP 6 | ProductionLine 모델 | ⬜ |
-| STEP 7 | 생산 라인 View / Controller | ⬜ |
-| STEP 8 | 모니터링 View / Controller | ⬜ |
-| STEP 9 | 출고 처리 View / Controller | ⬜ |
-| STEP 10 | 메인 메뉴 통합 | ⬜ |
+| STEP 5 | 주문 승인/거절 View / Controller | ✅ |
+| STEP 6 | ProductionLine 모델 | ✅ |
+| STEP 7 | 생산 라인 View / Controller | ✅ |
+| STEP 8 | 모니터링 View / Controller | ✅ |
+| STEP 9 | 출고 처리 View / Controller | ✅ |
+| STEP 10 | 메인 메뉴 통합 | ✅ |
 
 ---
 
