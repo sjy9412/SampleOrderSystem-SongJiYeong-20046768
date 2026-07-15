@@ -175,23 +175,23 @@ RESERVED ──승인(재고 충분)──→ CONFIRMED ──출고──→ RE
 ```
 [주문 관리]
 1. 주문 접수 (예약)
-2. 접수된 주문 목록
-3. 주문 승인
-4. 주문 거절
+2. 주문 승인/거절
 0. 뒤로
 ```
 
-**승인 로직 (Controller 내부)**
+**승인/거절 흐름 (Controller 내부)**
 
-```python
-def _handle_approve(order_id):
-    order = order_model.get_by_id(order_id)
-    if inventory_model.is_sufficient(order.sample_id, order.quantity):
-        inventory_model.decrease(order.sample_id, order.quantity)
-        order_model.confirm(order_id)          # → CONFIRMED
-    else:
-        order_model.set_producing(order_id)    # → PRODUCING
-        production_line.enqueue(order_id)      # 생산 큐 등록
+```
+_handle_approve_reject():
+  1. get_reserved() → show_orders()
+  2. get_order_id() → 주문 선택
+  3. get_approve_or_reject() → "승인" or "거절"
+     - "거절" → reject()  # REJECTED
+     - "승인" + 재고 충분 → decrease() + confirm()  # CONFIRMED
+     - "승인" + 재고 부족 → show_stock_insufficient()
+                           → get_approve_or_reject() 재확인
+                             - "승인" → set_producing() + enqueue()  # PRODUCING
+                             - "거절" → reject()  # REJECTED
 ```
 
 ---
