@@ -1,46 +1,54 @@
-# TDD Plan — FIFO 완료 후 다음 항목 승격 테스트
+# Plan: 시료 고유값 기준 변경 — 이름 단독
 
 ## Goal
 
-`complete()` 호출 후 큐에서 두 번째였던 주문이 **자동으로 `get_current()`의 반환값이 되는지** 검증한다.
+시료 중복 판단 기준을 **이름 + 평균 생산시간 + 수율 → 이름만**으로 좁힌다.
 
-## 작성할 테스트
+## 변경 대상
+
+| 파일 | 변경 내용 |
+|------|-----------|
+| `tests/test_sample_model.py` | 중복 관련 테스트 재편 (RED) |
+| `models/sample.py` | `add()` 중복 체크 로직 단순화 (GREEN) |
+| `docs/PRD.md` | "시료 중복 방지" 섹션 내용 수정 |
+
+## 작성할 테스트 (RED)
+
+### 추가 — `test_add_raises_when_same_name_different_attributes`
 
 ```python
-def test_complete_advances_to_next_order_in_queue(
-    production_line, order_model, inventory_model, sample_model
-):
-    sample = sample_model.add("시료M", avg_production_time=1.0, yield_rate=1.0)
-    inventory_model.increase(sample["id"], 0)
-
-    order1 = order_model.reserve(sample["id"], "첫번째", 5)
-    order2 = order_model.reserve(sample["id"], "두번째", 3)
-    order_model.set_producing(order1["id"])
-    order_model.set_producing(order2["id"])
-
-    production_line.enqueue(order1["id"])
-    production_line.enqueue(order2["id"])
-
-    production_line.complete(order1["id"])
-
-    current = production_line.get_current()
-    assert current is not None
-    assert current["order_id"] == order2["id"]
+def test_add_raises_when_same_name_different_attributes(model):
+    model.add("ChipX", 2.5, 0.95)
+    with pytest.raises(ValueError, match="이미 등록된 시료입니다."):
+        model.add("ChipX", 3.0, 0.80)   # 이름 같음, 나머지 속성 다름
 ```
+
+이 테스트는 현재 **실패**한다.
+현재 코드는 세 속성이 모두 동일해야 중복으로 처리하므로, 생산시간·수율이 다른 경우는 등록을 허용한다.
+
+### 수정 — `test_add_raises_when_duplicate_attributes` → `test_add_raises_when_name_is_duplicate`
+
+테스트 이름을 의도에 맞게 변경.
+내용은 동일: 이름이 같은 시료를 두 번 등록하면 ValueError 발생.
+
+### 삭제 — `test_add_succeeds_when_only_name_differs`
+
+새 규칙(이름 단독 고유값)과 이 테스트는 상충하지 않지만, 테스트 이름이 "이름이 달라야 별개"라는 뉘앙스를 잘못 전달한다.
+이름이 다른 시료가 성공하는 케이스는 `test_get_all_returns_all_added_samples` 등 다른 테스트가 이미 커버한다.
 
 ## 예상 실패 이유
 
-이 시나리오를 검증하는 테스트가 **현재 없기** 때문에 새로 추가한다.
-기존 `test_complete_removes_order_from_queue`는 단일 항목만 테스트하므로 다음 항목 승격은 미검증 상태다.
+`test_add_raises_when_same_name_different_attributes`:
+```
+FAILED: DID NOT RAISE <class 'ValueError'>
+```
+현재 중복 체크가 세 속성 모두를 AND로 검사하기 때문.
 
-> 만약 즉시 통과한다면: 구현이 이미 올바르다는 의미이고 테스트 추가 자체가 목적이므로 그대로 커밋.
+## 구현 방향 (GREEN)
 
-## 구현 방향
-
-- **추가 구현 코드 없음** — `complete()`가 해당 항목을 삭제하면 `get_current()`가 자연스럽게 다음 항목을 반환하는 구조가 이미 맞는지 확인하는 테스트.
-- 수정 파일: `tests/test_production_line.py`의 `# ── complete ──` 섹션 끝에 추가.
-
-## 파일
-
-- **수정**: `tests/test_production_line.py`
-- **수정 없음**: `models/production_line.py`
+```python
+# models/sample.py  add() 안에서
+for s in existing:
+    if s["name"] == name:          # 이름만 비교
+        raise ValueError("이미 등록된 시료입니다.")
+```

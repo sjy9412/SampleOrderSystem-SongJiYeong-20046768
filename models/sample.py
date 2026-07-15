@@ -10,9 +10,7 @@ class SampleModel(ObservableModel):
     def add(self, name: str, avg_production_time: float, yield_rate: float) -> dict:
         existing = store.read_all(COLLECTION)
         for s in existing:
-            if (s["name"] == name
-                    and s["avg_production_time"] == avg_production_time
-                    and s["yield_rate"] == yield_rate):
+            if s["name"] == name:
                 raise ValueError("이미 등록된 시료입니다.")
         next_id = f"S-{len(existing) + 1:03d}"
         record = store.create(COLLECTION, {

@@ -94,16 +94,16 @@ def test_search_is_case_insensitive(model):
 
 # ── 중복 등록 방지 ─────────────────────────────────────────────────────────────
 
-def test_add_raises_when_duplicate_attributes(model):
+def test_add_raises_when_name_is_duplicate(model):
     model.add("ChipX", 2.5, 0.95)
     with pytest.raises(ValueError, match="이미 등록된 시료입니다."):
         model.add("ChipX", 2.5, 0.95)
 
 
-def test_add_succeeds_when_only_name_differs(model):
+def test_add_raises_when_same_name_different_attributes(model):
     model.add("ChipX", 2.5, 0.95)
-    result = model.add("ChipY", 2.5, 0.95)
-    assert result["name"] == "ChipY"
+    with pytest.raises(ValueError, match="이미 등록된 시료입니다."):
+        model.add("ChipX", 3.0, 0.80)
 
 
 # ── 시료 ID 순번 부여 ──────────────────────────────────────────────────────────
