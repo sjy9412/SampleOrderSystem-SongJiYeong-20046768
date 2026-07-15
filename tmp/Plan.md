@@ -1,48 +1,45 @@
-# TDD Plan — 시료 중복 등록 방지
+# TDD Plan — 시료 ID 순번 부여 (S-001, S-002, …)
 
 ## Goal
 
-이름(`name`), 평균 생산 시간(`avg_production_time`), 수율(`yield_rate`) 세 가지가 모두 동일한 시료가 이미 존재하면 등록을 거부한다.
+시료를 등록할 때 UUID 대신 `S-001`, `S-002`, … 형태의 순번 ID를 자동 부여한다.
 
-- **Model**: `SampleModel.add()`에서 `ValueError("이미 등록된 시료입니다.")` raise
-- **Controller**: `_handle_register()`에서 `ValueError`를 catch하여 `view.show_error()` 호출
+- **기준**: 등록된 총 시료 수 + 1
+- **형식**: `S-{n:03d}` (세 자리 제로패딩)
+- **책임 위치**: `SampleModel.add()`에서 생성 후 `store.create()`에 전달
+- `json_store.create()`는 변경 없음 — record 딕셔너리에 `id`를 포함하면 UUID보다 우선 적용되는 현재 구조 활용
 
 ---
 
 ## 작성할 테스트
 
-### 테스트 1 — Model: 중복 속성이면 ValueError (파일: `tests/test_sample_model.py`)
+### 테스트 1 — 첫 번째 시료의 ID는 S-001 (파일: `tests/test_sample_model.py`)
 
 ```python
-def test_add_raises_when_duplicate_attributes(model):
-    model.add("ChipX", 2.5, 0.95)
-    with pytest.raises(ValueError, match="이미 등록된 시료입니다."):
-        model.add("ChipX", 2.5, 0.95)
+def test_first_sample_gets_id_S001(model):
+    sample = model.add("AlphaChip", 2.5, 0.95)
+    assert sample["id"] == "S-001"
 ```
 
-### 테스트 2 — Model: 속성 하나라도 다르면 정상 등록 (파일: `tests/test_sample_model.py`)
+### 테스트 2 — 순서대로 S-001, S-002 부여 (파일: `tests/test_sample_model.py`)
 
 ```python
-def test_add_succeeds_when_only_name_differs(model):
-    model.add("ChipX", 2.5, 0.95)
-    result = model.add("ChipY", 2.5, 0.95)  # 이름만 다름
-    assert result["name"] == "ChipY"
+def test_samples_get_sequential_ids(model):
+    s1 = model.add("AlphaChip", 2.5, 0.95)
+    s2 = model.add("BetaChip", 1.0, 0.80)
+    assert s1["id"] == "S-001"
+    assert s2["id"] == "S-002"
 ```
 
-### 테스트 3 — Controller: 중복 시료 등록 시 show_error 호출 (파일: `tests/test_sample_controller.py`)
+### 테스트 3 — 기존 시료가 있어도 연속 번호 유지 (파일: `tests/test_sample_model.py`)
 
 ```python
-def test_register_shows_error_on_duplicate(model, inventory_model, view):
-    model.add("ChipX", 2.5, 0.95)
-
-    view._choices = iter(['1', '0'])
-    view._sample_input = ("ChipX", 2.5, 0.95)
-    SampleController(model, inventory_model, view).run()
-
-    assert view.last_error == "이미 등록된 시료입니다."
+def test_id_continues_from_existing_count(model):
+    model.add("AlphaChip", 2.5, 0.95)   # S-001
+    model.add("BetaChip", 1.0, 0.80)    # S-002
+    s3 = model.add("GammaChip", 3.0, 0.90)
+    assert s3["id"] == "S-003"
 ```
-
-> `MockSampleView.show_error`가 `last_error`를 저장하도록 수정 필요.
 
 ---
 
@@ -50,48 +47,37 @@ def test_register_shows_error_on_duplicate(model, inventory_model, view):
 
 | 테스트 | 실패 원인 |
 |--------|-----------|
-| 테스트 1 | `SampleModel.add()`에 중복 체크 없음 → `ValueError` 미발생 |
-| 테스트 2 | 테스트 1 수정 후 부작용 없음 확인용 (처음엔 통과할 수 있음) |
-| 테스트 3 | `MockSampleView`에 `last_error` 없음 + `_handle_register`에 except 없음 |
+| 테스트 1 | `store.create()`가 UUID를 생성 → `"S-001"` 아님 |
+| 테스트 2 | 동일 원인 |
+| 테스트 3 | 동일 원인 |
 
 ---
 
 ## 구현 방향 (최소한의 변경)
 
-### 1. `MockSampleView` 수정 (`tests/test_sample_controller.py`)
-
-```python
-def show_error(self, msg):
-    self.last_error = msg
-```
-
-초기값 `self.last_error = None` 추가.
-
-### 2. `SampleModel.add()` 수정 (`models/sample.py`)
+### `SampleModel.add()` 수정 (`models/sample.py`)
 
 ```python
 def add(self, name, avg_production_time, yield_rate):
-    existing = [
-        s for s in store.read_all(COLLECTION)
-        if s["name"] == name
-        and s["avg_production_time"] == avg_production_time
-        and s["yield_rate"] == yield_rate
-    ]
-    if existing:
-        raise ValueError("이미 등록된 시료입니다.")
-    record = store.create(COLLECTION, {...})
-    ...
+    count = len(store.read_all(COLLECTION))
+    next_id = f"S-{count + 1:03d}"
+    record = store.create(COLLECTION, {
+        "id": next_id,           # json_store가 **record로 UUID 덮어씀 방지
+        "name": name,
+        "avg_production_time": avg_production_time,
+        "yield_rate": yield_rate,
+    })
+    self._notify(ModelEvent(type=EventType.ADDED, payload=record))
+    return record
 ```
 
-### 3. `SampleController._handle_register()` 수정 (`controllers/sample_controller.py`)
-
+`json_store.create()` 내부:
 ```python
-def _handle_register(self):
-    name, avg_time, yield_rate = self._view.get_sample_input()
-    try:
-        self._model.add(name, avg_time, yield_rate)
-    except ValueError as e:
-        self._view.show_error(str(e))
+record = {
+    "id": str(uuid.uuid4()),   # 기본값
+    ...
+    **record,                  # id가 포함되면 여기서 덮어씀 → S-001 적용됨
+}
 ```
 
 ---
@@ -100,8 +86,8 @@ def _handle_register(self):
 
 | 파일 | 변경 내용 |
 |------|-----------|
-| `tests/test_sample_model.py` | 테스트 2개 추가 |
-| `tests/test_sample_controller.py` | `MockSampleView` 수정, 테스트 1개 추가 |
-| `models/sample.py` | `add()`에 중복 체크 로직 추가 |
-| `controllers/sample_controller.py` | `_handle_register()`에 `try/except` 추가 |
-| `docs/PRD.md` | 시료 중복 방지 규칙 명시 (완료) |
+| `tests/test_sample_model.py` | 테스트 3개 추가 |
+| `models/sample.py` | `add()`에서 순번 ID 생성 후 전달 |
+| `docs/PRD.md` | 시료 ID 형식 명시 (완료) |
+
+기존 테스트 `test_add_returns_sample_with_id` — `sample["id"] is not None` 만 검증하므로 영향 없음.
