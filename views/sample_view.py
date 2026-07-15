@@ -43,6 +43,7 @@ class SampleView:
             return
         rows = [
             {
+                "ID": s["id"],
                 "이름": s["name"],
                 "평균 생산시간(min/ea)": f"{s['avg_production_time']:.1f}",
                 "수율": f"{s['yield_rate']:.2f}",
