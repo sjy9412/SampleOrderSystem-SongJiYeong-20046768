@@ -214,28 +214,52 @@ def test_get_current_info_includes_estimated_completion(
 
 # ── get_queue_info 확장 ──────────────────────────────────────────────────────
 
-def test_get_queue_info_includes_order_no(
+def test_get_queue_info_excludes_currently_producing_order(
     production_line, order_model, inventory_model, sample_model
 ):
     sample = sample_model.add("시료I", avg_production_time=1.0, yield_rate=1.0)
     inventory_model.increase(sample["id"], 0)
-    order = order_model.reserve(sample["id"], "테스트", 5)
-    order_model.set_producing(order["id"])
-    production_line.enqueue(order["id"])
+    order_current = order_model.reserve(sample["id"], "생산중", 5)
+    order_waiting = order_model.reserve(sample["id"], "대기중", 3)
+    order_model.set_producing(order_current["id"])
+    order_model.set_producing(order_waiting["id"])
+    production_line.enqueue(order_current["id"])
+    production_line.enqueue(order_waiting["id"])
 
     queue_info = production_line.get_queue_info()
 
-    assert queue_info[0]["order_no"] == order["order_no"]
+    assert len(queue_info) == 1
+    assert queue_info[0]["order_no"] == order_waiting["order_no"]
+
+
+def test_get_queue_info_includes_order_no(
+    production_line, order_model, inventory_model, sample_model
+):
+    sample = sample_model.add("시료J", avg_production_time=1.0, yield_rate=1.0)
+    inventory_model.increase(sample["id"], 0)
+    order_current = order_model.reserve(sample["id"], "생산중", 5)
+    order_waiting = order_model.reserve(sample["id"], "대기중", 3)
+    order_model.set_producing(order_current["id"])
+    order_model.set_producing(order_waiting["id"])
+    production_line.enqueue(order_current["id"])
+    production_line.enqueue(order_waiting["id"])
+
+    queue_info = production_line.get_queue_info()
+
+    assert queue_info[0]["order_no"] == order_waiting["order_no"]
 
 
 def test_get_queue_info_includes_shortage_and_actual_qty(
     production_line, order_model, inventory_model, sample_model
 ):
-    sample = sample_model.add("시료J", avg_production_time=2.0, yield_rate=0.5)
+    sample = sample_model.add("시료K", avg_production_time=2.0, yield_rate=0.5)
     inventory_model.increase(sample["id"], 5)
-    order = order_model.reserve(sample["id"], "테스트", 15)
-    order_model.set_producing(order["id"])
-    production_line.enqueue(order["id"])
+    order_current = order_model.reserve(sample["id"], "생산중", 5)
+    order_waiting = order_model.reserve(sample["id"], "대기중", 15)
+    order_model.set_producing(order_current["id"])
+    order_model.set_producing(order_waiting["id"])
+    production_line.enqueue(order_current["id"])
+    production_line.enqueue(order_waiting["id"])
 
     queue_info = production_line.get_queue_info()
 
@@ -246,16 +270,19 @@ def test_get_queue_info_includes_shortage_and_actual_qty(
 def test_get_queue_info_cumulative_estimated_completion(
     production_line, order_model, inventory_model, sample_model
 ):
-    sample = sample_model.add("시료K", avg_production_time=2.0, yield_rate=1.0)
+    sample = sample_model.add("시료L", avg_production_time=2.0, yield_rate=1.0)
     inventory_model.increase(sample["id"], 0)
-    order1 = order_model.reserve(sample["id"], "고객A", 10)  # total_time=20min
-    order2 = order_model.reserve(sample["id"], "고객B", 5)   # total_time=10min
-    order_model.set_producing(order1["id"])
-    order_model.set_producing(order2["id"])
-    production_line.enqueue(order1["id"])
-    production_line.enqueue(order2["id"])
+    order_current = order_model.reserve(sample["id"], "생산중", 5)   # total_time=10min
+    order_wait1 = order_model.reserve(sample["id"], "대기1", 10)     # total_time=20min
+    order_wait2 = order_model.reserve(sample["id"], "대기2", 5)      # total_time=10min
+    order_model.set_producing(order_current["id"])
+    order_model.set_producing(order_wait1["id"])
+    order_model.set_producing(order_wait2["id"])
+    production_line.enqueue(order_current["id"])
+    production_line.enqueue(order_wait1["id"])
+    production_line.enqueue(order_wait2["id"])
 
     queue_info = production_line.get_queue_info()
 
-    # 두 번째 항목 예상 완료 시각이 첫 번째보다 늦어야 함
+    assert len(queue_info) == 2
     assert queue_info[1]["estimated_completion"] > queue_info[0]["estimated_completion"]

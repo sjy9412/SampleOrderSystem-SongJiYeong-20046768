@@ -71,8 +71,9 @@ class ProductionLine(ObservableModel):
             now = datetime.now(timezone.utc)
         result = []
         queue = self.get_queue()
+        waiting_queue = queue[1:]  # 첫 번째(현재 생산 중)는 제외
         prev_completion: datetime | None = None
-        for i, item in enumerate(queue, 1):
+        for i, item in enumerate(waiting_queue, 1):
             order = self._order_model.get_by_id(item["order_id"])
             sample = self._sample_model.get_by_id(order["sample_id"])
             stock = self._inventory_model.get_stock(order["sample_id"])

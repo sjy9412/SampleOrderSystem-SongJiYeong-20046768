@@ -115,16 +115,20 @@ def test_queue_shows_waiting_orders_in_order(
     controller, production_line, order_model, sample_model, view
 ):
     sample = sample_model.add("AAA", 2.0, 0.8)
-    order1 = order_model.reserve(sample["id"], "홍길동", 5)
-    order2 = order_model.reserve(sample["id"], "이순신", 3)
+    order_current = order_model.reserve(sample["id"], "강감찬", 8)  # 생산 중
+    order1 = order_model.reserve(sample["id"], "홍길동", 5)         # 대기 1번
+    order2 = order_model.reserve(sample["id"], "이순신", 3)         # 대기 2번
+    order_model.set_producing(order_current["id"])
     order_model.set_producing(order1["id"])
     order_model.set_producing(order2["id"])
+    production_line.enqueue(order_current["id"])
     production_line.enqueue(order1["id"])
     production_line.enqueue(order2["id"])
 
     view.set_inputs("2", "0")
     controller.run()
 
+    # 현재 생산 중인 order_current는 대기 목록에서 제외
     assert len(view.shown_queue) == 2
     assert view.shown_queue[0]["position"] == 1
     assert view.shown_queue[0]["order_no"] == order1["order_no"]
