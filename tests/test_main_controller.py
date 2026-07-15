@@ -22,6 +22,7 @@ class FakeOrderModel:
 
 class FakeProductionLine:
     def get_queue(self): return [{"order_id": "o1"}]
+    def auto_complete_if_done(self, now=None): pass
 
 
 def _dashboard_ctrl():

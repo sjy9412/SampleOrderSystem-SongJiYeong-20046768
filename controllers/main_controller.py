@@ -63,6 +63,8 @@ class MainController:
             if not first:
                 separator()
             first = False
+            if self._production_line:
+                self._production_line.auto_complete_if_done()
             self._show_dashboard()
             console.print()
             show_menu_panel("메인 메뉴", [

@@ -87,9 +87,11 @@ def test_get_current_returns_none_when_queue_is_empty(production_line):
 
 # ── complete ──────────────────────────────────────────────────────────────────
 
-def test_complete_increases_inventory(
+def test_complete_adjusts_inventory(
     production_line, order_model, inventory_model, sample_model
 ):
+    # stock=5, order_qty=15, shortage=10, yield=0.5 → actual_qty=20
+    # 생산 후 재고: 5 + 20(생산) - 15(주문 차감) = 10
     sample = sample_model.add("시료A", avg_production_time=2.0, yield_rate=0.5)
     inventory_model.increase(sample["id"], 5)
     order = order_model.reserve(sample["id"], "홍길동", 15)
@@ -98,8 +100,7 @@ def test_complete_increases_inventory(
 
     production_line.complete(order["id"])
 
-    # shortage=10, yield=0.5 → actual_qty=20
-    assert inventory_model.get_stock(sample["id"]) == 5 + 20
+    assert inventory_model.get_stock(sample["id"]) == 5 + 20 - 15
 
 
 def test_complete_confirms_order(
@@ -286,6 +287,149 @@ def test_get_queue_info_includes_shortage_and_actual_qty(
 
     assert queue_info[0]["shortage"] == 10        # 15 - 5
     assert queue_info[0]["actual_qty"] == 20      # ceil(10 / 0.5)
+
+
+# ── auto_complete_if_done ────────────────────────────────────────────────────
+
+def test_auto_complete_if_done_returns_false_when_queue_empty(production_line):
+    assert production_line.auto_complete_if_done() is False
+
+
+def test_auto_complete_if_done_returns_false_before_time(
+    production_line, order_model, inventory_model, sample_model
+):
+    sample = sample_model.add("시료Ac1", avg_production_time=2.0, yield_rate=1.0)
+    inventory_model.increase(sample["id"], 0)
+    order = order_model.reserve(sample["id"], "테스트", 5)
+    order_model.set_producing(order["id"])
+    production_line.enqueue(order["id"])
+
+    queue_item = production_line.get_current()
+    created_at = datetime.fromisoformat(queue_item["created_at"])
+    not_done = created_at + timedelta(minutes=5)  # total=10min, 50%
+
+    result = production_line.auto_complete_if_done(now=not_done)
+
+    assert result is False
+    assert order_model.get_by_id(order["id"])["status"] == "PRODUCING"
+
+
+def test_auto_complete_if_done_completes_when_elapsed(
+    production_line, order_model, inventory_model, sample_model
+):
+    sample = sample_model.add("시료Ac2", avg_production_time=2.0, yield_rate=1.0)
+    inventory_model.increase(sample["id"], 0)
+    order = order_model.reserve(sample["id"], "테스트", 5)
+    order_model.set_producing(order["id"])
+    production_line.enqueue(order["id"])
+
+    queue_item = production_line.get_current()
+    created_at = datetime.fromisoformat(queue_item["created_at"])
+    past = created_at + timedelta(minutes=11)  # total=10min 초과
+
+    result = production_line.auto_complete_if_done(now=past)
+
+    assert result is True
+    assert order_model.get_by_id(order["id"])["status"] == "CONFIRMED"
+    assert production_line.get_queue() == []
+
+
+def test_auto_complete_if_done_cascades_multiple(
+    production_line, order_model, inventory_model, sample_model
+):
+    # order1: total=2min, order2: total=3min, 모두 완료된 시각 전달
+    sample = sample_model.add("시료Cas", avg_production_time=1.0, yield_rate=1.0)
+    inventory_model.increase(sample["id"], 0)
+    order1 = order_model.reserve(sample["id"], "첫번째", 2)
+    order2 = order_model.reserve(sample["id"], "두번째", 3)
+    order_model.set_producing(order1["id"])
+    order_model.set_producing(order2["id"])
+    production_line.enqueue(order1["id"])
+    production_line.enqueue(order2["id"])
+
+    queue_item = production_line.get_current()
+    created_at = datetime.fromisoformat(queue_item["created_at"])
+    far_future = created_at + timedelta(minutes=100)  # 둘 다 완료
+
+    production_line.auto_complete_if_done(now=far_future)
+
+    assert order_model.get_by_id(order1["id"])["status"] == "CONFIRMED"
+    assert order_model.get_by_id(order2["id"])["status"] == "CONFIRMED"
+    assert production_line.get_queue() == []
+
+
+# ── get_current_info 자동 완료 ────────────────────────────────────────────────
+
+def test_get_current_info_auto_completes_when_time_elapsed(
+    production_line, order_model, inventory_model, sample_model
+):
+    sample = sample_model.add("시료Auto", avg_production_time=2.0, yield_rate=1.0)
+    inventory_model.increase(sample["id"], 0)
+    order = order_model.reserve(sample["id"], "테스트", 5)
+    order_model.set_producing(order["id"])
+    production_line.enqueue(order["id"])
+
+    queue_item = production_line.get_current()
+    created_at = datetime.fromisoformat(queue_item["created_at"])
+    past_completion = created_at + timedelta(minutes=11)  # total=10min, 11분 경과
+
+    result = production_line.get_current_info(now=past_completion)
+
+    updated = order_model.get_by_id(order["id"])
+    assert updated["status"] == "CONFIRMED"
+    assert production_line.get_queue() == []
+    assert result is None
+
+
+def test_get_current_info_does_not_auto_complete_before_time(
+    production_line, order_model, inventory_model, sample_model
+):
+    sample = sample_model.add("시료NoAuto", avg_production_time=2.0, yield_rate=1.0)
+    inventory_model.increase(sample["id"], 0)
+    order = order_model.reserve(sample["id"], "테스트", 5)
+    order_model.set_producing(order["id"])
+    production_line.enqueue(order["id"])
+
+    queue_item = production_line.get_current()
+    created_at = datetime.fromisoformat(queue_item["created_at"])
+    not_done_yet = created_at + timedelta(minutes=5)  # total=10min, 5분 경과(50%)
+
+    result = production_line.get_current_info(now=not_done_yet)
+
+    updated = order_model.get_by_id(order["id"])
+    assert updated["status"] == "PRODUCING"
+    assert result is not None
+    assert result["progress_pct"] == pytest.approx(50.0)
+
+
+def test_get_current_info_auto_completes_and_returns_next(
+    production_line, order_model, inventory_model, sample_model
+):
+    # order1: avg=2.0, qty=5 → total=10min
+    # order2: avg=60.0, qty=5 → total=300min (아직 완료 안 됨)
+    sample1 = sample_model.add("시료Next1", avg_production_time=2.0, yield_rate=1.0)
+    sample2 = sample_model.add("시료Next2", avg_production_time=60.0, yield_rate=1.0)
+    inventory_model.increase(sample1["id"], 0)
+    inventory_model.increase(sample2["id"], 0)
+    order1 = order_model.reserve(sample1["id"], "첫번째", 5)
+    order2 = order_model.reserve(sample2["id"], "두번째", 5)
+    order_model.set_producing(order1["id"])
+    order_model.set_producing(order2["id"])
+    production_line.enqueue(order1["id"])
+    production_line.enqueue(order2["id"])
+
+    queue_item = production_line.get_current()
+    created_at = datetime.fromisoformat(queue_item["created_at"])
+    past_completion = created_at + timedelta(minutes=11)  # order1 total=10min 초과
+
+    result = production_line.get_current_info(now=past_completion)
+
+    updated1 = order_model.get_by_id(order1["id"])
+    assert updated1["status"] == "CONFIRMED"
+    current = production_line.get_current()
+    assert current["order_id"] == order2["id"]
+    assert result is not None
+    assert result["order_id"] == order2["id"]
 
 
 def test_get_queue_info_cumulative_estimated_completion(

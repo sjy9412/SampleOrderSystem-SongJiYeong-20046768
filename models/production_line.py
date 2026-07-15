@@ -33,12 +33,34 @@ class ProductionLine(ObservableModel):
         total_time = avg_time * actual_qty
         return actual_qty, total_time
 
+    def auto_complete_if_done(self, now: datetime | None = None) -> bool:
+        current = self.get_current()
+        if current is None:
+            return False
+        if now is None:
+            now = datetime.now(timezone.utc)
+        order = self._order_model.get_by_id(current["order_id"])
+        sample = self._sample_model.get_by_id(order["sample_id"])
+        stock = self._inventory_model.get_stock(order["sample_id"])
+        shortage = max(0, order["quantity"] - stock)
+        _, total_time = self.calculate_production(
+            shortage, sample["yield_rate"], sample["avg_production_time"]
+        )
+        started_at = datetime.fromisoformat(current["created_at"])
+        elapsed_min = (now - started_at).total_seconds() / 60
+        if total_time == 0 or elapsed_min >= total_time:
+            self.complete(current["order_id"])
+            self.auto_complete_if_done(now=now)
+            return True
+        return False
+
     def get_current_info(self, now: datetime | None = None) -> dict | None:
+        if now is None:
+            now = datetime.now(timezone.utc)
+        self.auto_complete_if_done(now=now)
         current = self.get_current()
         if current is None:
             return None
-        if now is None:
-            now = datetime.now(timezone.utc)
         order = self._order_model.get_by_id(current["order_id"])
         sample = self._sample_model.get_by_id(order["sample_id"])
         stock = self._inventory_model.get_stock(order["sample_id"])
@@ -119,6 +141,7 @@ class ProductionLine(ObservableModel):
             shortage, sample["yield_rate"], sample["avg_production_time"]
         )
         self._inventory_model.increase(order["sample_id"], actual_qty)
+        self._inventory_model.decrease(order["sample_id"], order["quantity"])
         self._order_model.confirm_production(order_id)
         for item in store.read_all(COLLECTION, order_id=order_id):
             store.delete(COLLECTION, item["id"])
