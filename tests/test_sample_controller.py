@@ -12,6 +12,7 @@ class MockSampleView:
         self._sample_input = None
         self._keyword = None
         self.invalid_input_shown = False
+        self.last_error = None
 
     def show_menu(self): pass
     def get_menu_choice(self): return next(self._choices)
@@ -20,7 +21,7 @@ class MockSampleView:
     def show_samples(self, samples, stocks):
         self.shown_samples = samples
         self.shown_stocks = stocks
-    def show_error(self, msg): pass
+    def show_error(self, msg): self.last_error = msg
     def show_invalid_input(self): self.invalid_input_shown = True
     def show_exit(self): pass
     def on_model_changed(self, event): pass
@@ -109,3 +110,13 @@ def test_search_passes_stock_quantities_to_view(model, inventory_model, view):
     SampleController(model, inventory_model, view).run()
 
     assert view.shown_stocks[sample["id"]] == 30
+
+
+def test_register_shows_error_on_duplicate(model, inventory_model, view):
+    model.add("ChipX", 2.5, 0.95)
+
+    view._choices = iter(['1', '0'])
+    view._sample_input = ("ChipX", 2.5, 0.95)
+    SampleController(model, inventory_model, view).run()
+
+    assert view.last_error == "이미 등록된 시료입니다."

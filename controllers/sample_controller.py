@@ -25,7 +25,10 @@ class SampleController:
 
     def _handle_register(self) -> None:
         name, avg_time, yield_rate = self._view.get_sample_input()
-        self._model.add(name, avg_time, yield_rate)
+        try:
+            self._model.add(name, avg_time, yield_rate)
+        except ValueError as e:
+            self._view.show_error(str(e))
 
     def _handle_list(self) -> None:
         samples = self._model.get_all()

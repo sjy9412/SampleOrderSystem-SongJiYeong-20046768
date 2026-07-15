@@ -8,6 +8,14 @@ COLLECTION = "samples"
 class SampleModel(ObservableModel):
 
     def add(self, name: str, avg_production_time: float, yield_rate: float) -> dict:
+        duplicates = [
+            s for s in store.read_all(COLLECTION)
+            if s["name"] == name
+            and s["avg_production_time"] == avg_production_time
+            and s["yield_rate"] == yield_rate
+        ]
+        if duplicates:
+            raise ValueError("이미 등록된 시료입니다.")
         record = store.create(COLLECTION, {
             "name": name,
             "avg_production_time": avg_production_time,
