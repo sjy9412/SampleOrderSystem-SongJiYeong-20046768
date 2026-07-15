@@ -37,7 +37,10 @@ def _load() -> dict:
     if not os.path.exists(DB_PATH):
         return _init_db()
     with open(DB_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+        content = f.read().strip()
+    if not content:
+        return _init_db()
+    return json.loads(content)
 
 
 def _save(data: dict) -> None:

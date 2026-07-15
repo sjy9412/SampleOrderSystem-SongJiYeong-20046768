@@ -1,6 +1,6 @@
 from __future__ import annotations
 from datetime import datetime
-from views.display import console, show_menu_panel, prompt_choice, separator, error, info
+from views.display import console, show_menu_panel, prompt_choice, separator, error, info, warn
 from rich.panel import Panel
 from rich.text import Text
 
@@ -82,5 +82,4 @@ class MainController:
                 separator()
                 self._controllers[int(choice) - 1].run()
             else:
-                from views.display import warn
                 warn("잘못된 입력입니다.")

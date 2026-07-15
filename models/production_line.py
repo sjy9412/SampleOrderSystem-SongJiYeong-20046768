@@ -72,7 +72,21 @@ class ProductionLine(ObservableModel):
         result = []
         queue = self.get_queue()
         waiting_queue = queue[1:]  # 첫 번째(현재 생산 중)는 제외
-        prev_completion: datetime | None = None
+        if not waiting_queue:
+            return result
+
+        # 대기 항목의 시작 기준 = 현재 생산 중인 항목의 완료 시각
+        current = queue[0]
+        current_order = self._order_model.get_by_id(current["order_id"])
+        current_sample = self._sample_model.get_by_id(current_order["sample_id"])
+        current_stock = self._inventory_model.get_stock(current_order["sample_id"])
+        current_shortage = max(0, current_order["quantity"] - current_stock)
+        _, current_total_time = self.calculate_production(
+            current_shortage, current_sample["yield_rate"], current_sample["avg_production_time"]
+        )
+        current_started_at = datetime.fromisoformat(current["created_at"])
+        prev_completion = current_started_at + timedelta(minutes=current_total_time)
+
         for i, item in enumerate(waiting_queue, 1):
             order = self._order_model.get_by_id(item["order_id"])
             sample = self._sample_model.get_by_id(order["sample_id"])
@@ -81,11 +95,7 @@ class ProductionLine(ObservableModel):
             actual_qty, total_time = self.calculate_production(
                 shortage, sample["yield_rate"], sample["avg_production_time"]
             )
-            if i == 1:
-                started_at = datetime.fromisoformat(item["created_at"])
-                completion_dt = started_at + timedelta(minutes=total_time)
-            else:
-                completion_dt = prev_completion + timedelta(minutes=total_time)
+            completion_dt = prev_completion + timedelta(minutes=total_time)
             prev_completion = completion_dt
             estimated_completion = completion_dt.astimezone().strftime("%Y-%m-%d %H:%M")
             result.append({
@@ -104,7 +114,7 @@ class ProductionLine(ObservableModel):
         order = self._order_model.get_by_id(order_id)
         sample = self._sample_model.get_by_id(order["sample_id"])
         current_stock = self._inventory_model.get_stock(order["sample_id"])
-        shortage = order["quantity"] - current_stock
+        shortage = max(0, order["quantity"] - current_stock)
         actual_qty, _ = self.calculate_production(
             shortage, sample["yield_rate"], sample["avg_production_time"]
         )

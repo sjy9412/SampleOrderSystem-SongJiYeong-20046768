@@ -82,13 +82,15 @@ from views.display import (
     show_menu_panel,  # Panel 형태의 번호 메뉴
     prompt_choice,    # 선택 프롬프트 → str 반환
     prompt_input,     # 레이블 프롬프트 → str 반환
-    section,          # 구분선 (console.rule)
+    section,          # 섹션 제목 구분선 (console.rule)
+    separator,        # 빈 구분선 — 화면 전환 시 컨트롤러에서 사용
     success, error, info, warn,  # 아이콘 포함 상태 메시지
+    STATUS_STYLES,    # 상태 문자열 → Rich 스타일 매핑 (주문·재고 공용)
 )
 ```
 
 - `print_table`에 `col_labels` 딕셔너리를 넘기면 컬럼 헤더를 한국어로 바꿀 수 있다.
-- `status` 키를 가진 컬럼은 주문 상태에 따라 자동 색상 적용 (`_STATUS_STYLES`).
+- `status` 키를 가진 컬럼은 `STATUS_STYLES`에 따라 자동 색상 적용 (주문 상태 + 재고 상태 "고갈"/"부족"/"여유" 포함).
 - View에서 `print()` / `input()`을 직접 사용하지 않는다. 반드시 이 모듈의 함수를 사용한다.
 
 **Controller**

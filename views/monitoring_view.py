@@ -4,7 +4,7 @@ from views.display import (
     console, print_table, show_menu_panel,
     prompt_choice, prompt_input, section,
     error, info, warn,
-    _STATUS_STYLES,
+    STATUS_STYLES,
 )
 from rich.table import Table
 from rich import box
@@ -35,7 +35,7 @@ class MonitoringView:
         t.add_column("건수", justify="right", min_width=6)
         statuses = ("RESERVED", "PRODUCING", "CONFIRMED", "RELEASE")
         for status in statuses:
-            style = _STATUS_STYLES.get(status, "")
+            style = STATUS_STYLES.get(status, "")
             t.add_row(
                 Text(status, style=style),
                 Text(f"{counts.get(status, 0)}건", style=style),

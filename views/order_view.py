@@ -4,7 +4,11 @@ from views.display import (
     console, print_table, show_menu_panel,
     prompt_choice, prompt_input, section,
     success, error, info, warn,
+    STATUS_STYLES,
 )
+from rich.table import Table
+from rich import box
+from rich.panel import Panel
 
 
 class OrderView:
@@ -86,8 +90,8 @@ class OrderView:
         print_table(rows, col_labels={"status": "상태"})
 
     def get_order_number_choice(self, count: int) -> int:
-        console.print(f"\n  [dim]번호를 입력하세요 (0: 뒤로, 1-{count}):[/dim] ", end="")
-        raw = input().strip()
+        console.print()
+        raw = prompt_input(f"번호를 입력하세요 (0: 뒤로, 1-{count}):")
         try:
             return int(raw)
         except ValueError:
@@ -99,9 +103,7 @@ class OrderView:
     def show_stock_detail(
         self, sample_name: str, stock: int, quantity: int, shortage: int
     ) -> None:
-        from rich.table import Table
-        from rich import box as rbox
-        t = Table(box=rbox.ROUNDED, border_style="bright_black", show_header=True,
+        t = Table(box=box.ROUNDED, border_style="bright_black", show_header=True,
                   header_style="bold white")
         t.add_column("항목", no_wrap=True)
         t.add_column("수량", no_wrap=True)
@@ -113,8 +115,7 @@ class OrderView:
         console.print(t)
 
     def show_approve_result(self, order_no: str, status: str) -> None:
-        from views.display import _STATUS_STYLES
-        style = _STATUS_STYLES.get(status, "")
+        style = STATUS_STYLES.get(status, "")
         if status == "REJECTED":
             error(f"승인 거절  주문번호: [bold cyan]{order_no}[/bold cyan]")
         else:
@@ -141,8 +142,6 @@ class OrderView:
         return prompt_input(f"{action} ID:")
 
     def show_order_confirmation(self, sample_id: str, customer_name: str, quantity: int) -> None:
-        from rich.panel import Panel
-        from views.display import console
         body = (
             f"  시료 ID:  [bold]{sample_id}[/bold]\n"
             f"  고객명:   [bold]{customer_name}[/bold]\n"
@@ -157,12 +156,10 @@ class OrderView:
         ))
 
     def get_confirm_yn(self) -> str:
-        console.print("\n  [bold yellow]예약 접수 하시겠습니까? (Y/N)[/bold yellow] ", end="")
-        return input().strip()
+        return prompt_choice("예약 접수 하시겠습니까? (Y/N)")
 
     def show_reserve_success(self, order_no: str, status: str) -> None:
-        from views.display import _STATUS_STYLES
-        style = _STATUS_STYLES.get(status, "")
+        style = STATUS_STYLES.get(status, "")
         success("예약 접수 완료")
         console.print(f"  주문번호: [bold cyan]{order_no}[/bold cyan]")
         console.print(f"  현재 상태: [{style}]{status}[/{style}]")

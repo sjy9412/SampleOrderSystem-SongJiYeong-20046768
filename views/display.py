@@ -23,7 +23,7 @@ from rich.panel import Panel
 
 console = Console(highlight=False, force_terminal=True)
 
-_STATUS_STYLES: dict[str, str] = {
+STATUS_STYLES: dict[str, str] = {
     "RESERVED":  "bold yellow",
     "PRODUCING": "bold blue",
     "CONFIRMED": "bold green",
@@ -37,7 +37,7 @@ def _fmt_cell(key: str, value: Any) -> Text:
         return Text("-", style="dim")
     s = str(value)
     if key == "status":
-        style = _STATUS_STYLES.get(s, "")
+        style = STATUS_STYLES.get(s, "")
         return Text(s, style=style)
     return Text(s)
 
