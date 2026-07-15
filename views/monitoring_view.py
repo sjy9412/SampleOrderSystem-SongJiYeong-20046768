@@ -1,58 +1,76 @@
 from __future__ import annotations
 from models.base import ModelEvent
+from views.display import (
+    console, print_table, show_menu_panel,
+    prompt_choice, prompt_input, section,
+    error, info, warn,
+    _STATUS_STYLES,
+)
+from rich.table import Table
+from rich import box
+from rich.text import Text
 
 
 class MonitoringView:
-
-    MENU = (
-        "\n[모니터링]\n"
-        "1. 주문량 확인 (상태별)\n"
-        "2. 재고량 확인 (시료별)\n"
-        "0. 뒤로\n"
-    )
 
     def __init__(self) -> None:
         pass
 
     def show_menu(self) -> None:
-        print(self.MENU)
+        console.print()
+        show_menu_panel("모니터링", [
+            ("1", "주문량 확인 (상태별)"),
+            ("2", "재고량 확인 (시료별)"),
+            ("0", "뒤로"),
+        ])
 
     def get_menu_choice(self) -> str:
-        return input("선택: ").strip()
+        return prompt_choice()
 
     def show_order_counts(self, counts: dict) -> None:
-        print("\n[주문량 현황 (상태별)]")
-        header = f"{'상태':<12} {'건수':>6}"
-        print(header)
-        print("-" * len(header))
-        for status in ("RESERVED", "PRODUCING", "CONFIRMED", "RELEASE"):
-            print(f"{status:<12} {counts.get(status, 0):>6}건")
+        section("주문량 현황 (상태별)")
+        t = Table(box=box.ROUNDED, show_lines=False,
+                  header_style="bold white", border_style="bright_black", expand=False)
+        t.add_column("상태", min_width=12)
+        t.add_column("건수", justify="right", min_width=6)
+        statuses = ("RESERVED", "PRODUCING", "CONFIRMED", "RELEASE")
+        for status in statuses:
+            style = _STATUS_STYLES.get(status, "")
+            t.add_row(
+                Text(status, style=style),
+                Text(f"{counts.get(status, 0)}건", style=style),
+            )
+        console.print(t)
 
     def show_inventory_status(self, items: list[dict]) -> None:
-        print("\n[재고 현황 (시료별)]")
+        section("재고 현황 (시료별)")
         if not items:
-            print("등록된 재고가 없습니다.")
+            info("등록된 재고가 없습니다.")
             return
-        header = f"{'시료명':<16} {'재고 수량':>10} {'상태':<6}"
-        print(header)
-        print("-" * len(header))
-        for item in items:
-            print(f"{item['name']:<16} {item['quantity']:>10} {item['status']:<6}")
+        rows = [
+            {
+                "시료명": item["name"],
+                "재고 수량": str(item["quantity"]),
+                "status": item["status"],
+            }
+            for item in items
+        ]
+        print_table(rows, col_labels={"status": "상태"})
 
     def show_error(self, message: str) -> None:
-        print(f"[오류] {message}")
+        error(message)
 
     def show_invalid_input(self) -> None:
-        print("잘못된 입력입니다.")
+        warn("잘못된 입력입니다.")
 
     def show_exit(self) -> None:
-        print("뒤로 갑니다.")
+        info("뒤로 갑니다.")
 
     def get_title_input(self) -> str:
-        return input("제목: ").strip()
+        return prompt_input("제목:")
 
     def get_id_input(self, action: str) -> str:
-        return input(f"{action} ID: ").strip()
+        return prompt_input(f"{action} ID:")
 
     def on_model_changed(self, event: ModelEvent) -> None:
         pass

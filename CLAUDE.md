@@ -71,6 +71,26 @@ db/            ← JSON 파일 영속성 레이어
 - View는 생성자에서 `model.subscribe(self)`로 자기 자신을 등록한다.
 - View 구현체를 교체해도 Controller·Model 코드는 한 줄도 바뀌지 않는다.
 
+**Rich 콘솔 유틸리티 (`views/display.py`)**
+
+모든 View가 공유하는 Rich 기반 렌더링 모듈. `db/monitor/display.py`와 동일한 패턴.
+
+```python
+from views.display import (
+    console,          # Rich Console 인스턴스 (공유)
+    print_table,      # Rich ROUNDED 테이블 출력 (status 컬럼 자동 색상)
+    show_menu_panel,  # Panel 형태의 번호 메뉴
+    prompt_choice,    # 선택 프롬프트 → str 반환
+    prompt_input,     # 레이블 프롬프트 → str 반환
+    section,          # 구분선 (console.rule)
+    success, error, info, warn,  # 아이콘 포함 상태 메시지
+)
+```
+
+- `print_table`에 `col_labels` 딕셔너리를 넘기면 컬럼 헤더를 한국어로 바꿀 수 있다.
+- `status` 키를 가진 컬럼은 주문 상태에 따라 자동 색상 적용 (`_STATUS_STYLES`).
+- View에서 `print()` / `input()`을 직접 사용하지 않는다. 반드시 이 모듈의 함수를 사용한다.
+
 **Controller**
 
 - `app.py`의 `create_app()`이 Model·View·Controller를 조립해 반환한다.
@@ -104,3 +124,10 @@ RED (실패 테스트 작성 + tmp/Plan.md) → 사용자 검토·승인 → GRE
 
 - 테스트가 먼저 실패하는 것을 직접 확인하지 않으면 GREEN으로 진행하지 않는다.
 - mock은 외부 경계(파일 I/O, 시간 등)에서만 사용한다. 내부 레이어 간 호출은 실제 객체를 사용한다.
+- View 출력 검증 시 `builtins.print`를 mock하지 않는다. Rich는 `console.print()`로 stdout에 직접 쓰므로 `capsys` fixture로 캡처한다.
+
+```python
+def test_shows_error(capsys):
+    ...
+    assert "잘못된" in capsys.readouterr().out
+```

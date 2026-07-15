@@ -29,13 +29,11 @@ def test_dispatches_to_first_sub_controller():
     assert stub.called
 
 
-def test_invalid_input_shows_invalid_message():
+def test_invalid_input_shows_invalid_message(capsys):
     ctrl = MainController([])
-    output = []
     with patch("builtins.input", side_effect=["9", "0"]):
-        with patch("builtins.print", side_effect=lambda *a, **k: output.append(" ".join(str(x) for x in a))):
-            ctrl.run()
-    assert any("잘못된" in line for line in output)
+        ctrl.run()
+    assert "잘못된" in capsys.readouterr().out
 
 
 def test_create_app_returns_object_with_run():
