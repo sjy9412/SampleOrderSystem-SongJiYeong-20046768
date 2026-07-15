@@ -1,100 +1,137 @@
-# Plan — STEP 3: Order 모델
+# Plan — STEP 4: Inventory (재고) 모델
 
-## 목표 (goal)
+## 목표 (Goal)
 
-`models/order.py`에 `OrderModel` 클래스를 구현한다.  
-주문 생성(RESERVED)부터 상태 전이(PRODUCING / CONFIRMED / RELEASE / REJECTED)까지의 도메인 로직을 커버한다.
+`models/inventory.py`에 `InventoryModel`을 구현한다.  
+시료별 재고 수량을 DB에 영속화하고, 주문 대비 재고 상태를 판단하는 기능을 제공한다.
 
 ---
 
-## 작성할 테스트 (`tests/test_order_model.py`)
+## 데이터 구조
 
-### 픽스처
+컬렉션명: `"inventories"`
 
-```python
-@pytest.fixture(autouse=True)
-def clean_db():
-    store.reset("orders")
-    yield
-    store.reset("orders")
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `sample_id` | str | 시료 ID (고유, 검색 키) |
+| `quantity` | int | 현재 재고 수량 |
 
-@pytest.fixture
-def model():
-    return OrderModel()
+> `id`, `created_at`, `updated_at`는 `json_store.create()`가 자동 부여
+
+---
+
+## 구현 메서드
+
+| 메서드 | 설명 |
+|--------|------|
+| `get_stock(sample_id)` | 특정 시료의 현재 재고 수량 반환 (없으면 0) |
+| `get_all_stocks()` | 전체 시료 재고 레코드 목록 반환 |
+| `is_sufficient(sample_id, quantity)` | 재고 >= quantity 이면 True |
+| `decrease(sample_id, quantity)` | 재고 차감. 재고 부족 시 ValueError |
+| `increase(sample_id, quantity)` | 재고 증가. 레코드 없으면 신규 생성 |
+| `get_status(sample_id, ordered_quantity)` | `"여유"` / `"부족"` / `"고갈"` 반환 |
+
+**상태 판단 규칙**
+- `"고갈"`: `quantity == 0`
+- `"부족"`: `0 < quantity < ordered_quantity`
+- `"여유"`: `quantity >= ordered_quantity`
+
+---
+
+## 작성할 테스트 (tests/test_inventory_model.py)
+
 ```
+1. test_get_stock_returns_zero_for_unknown_sample
+   -> 재고 레코드 없는 시료 조회 시 0 반환
 
-### 테스트 목록
+2. test_increase_creates_stock_record
+   -> increase 후 get_stock이 해당 수량 반환
 
-| # | 테스트명 | 검증 내용 |
-|---|----------|-----------|
-| 1 | `test_reserve_returns_order_with_id` | `reserve()` 반환 객체에 id, sample_id, customer_name, quantity, status=="RESERVED" 포함 |
-| 2 | `test_reserve_emits_added_event` | `reserve()` 호출 시 `EventType.ADDED` 이벤트 발행, payload에 주문 포함 |
-| 3 | `test_get_reserved_returns_only_reserved_orders` | RESERVED 주문만 반환, 다른 상태는 제외 |
-| 4 | `test_get_by_status_returns_matching_orders` | 지정 상태의 주문 목록 반환 |
-| 5 | `test_get_by_id_returns_correct_order` | ID로 단건 조회 |
-| 6 | `test_get_by_id_returns_none_for_unknown_id` | 없는 ID → None 반환 |
-| 7 | `test_confirm_changes_status_to_confirmed` | `confirm()` → status == "CONFIRMED" |
-| 8 | `test_reject_changes_status_to_rejected` | `reject()` → status == "REJECTED" |
-| 9 | `test_set_producing_changes_status_to_producing` | `set_producing()` → status == "PRODUCING" |
-| 10 | `test_release_changes_status_to_release` | `release()` → status == "RELEASE" |
-| 11 | `test_confirm_only_works_on_reserved_order` | RESERVED가 아닌 주문에 `confirm()` → ValueError |
-| 12 | `test_reject_only_works_on_reserved_order` | RESERVED가 아닌 주문에 `reject()` → ValueError |
-| 13 | `test_set_producing_only_works_on_reserved_order` | RESERVED가 아닌 주문에 `set_producing()` → ValueError |
-| 14 | `test_release_only_works_on_confirmed_order` | CONFIRMED가 아닌 주문에 `release()` → ValueError |
+3. test_increase_accumulates_quantity
+   -> 두 번 increase 하면 합계가 반환됨
+
+4. test_decrease_reduces_stock
+   -> decrease 후 get_stock이 줄어든 수량 반환
+
+5. test_decrease_raises_when_insufficient
+   -> 재고보다 많은 양 차감 시 ValueError
+
+6. test_is_sufficient_returns_true_when_enough
+   -> quantity >= ordered_quantity -> True
+
+7. test_is_sufficient_returns_false_when_not_enough
+   -> quantity < ordered_quantity -> False
+
+8. test_get_all_stocks_returns_all_records
+   -> 여러 시료 increase 후 get_all_stocks() 결과 수 일치
+
+9. test_get_status_returns_여유_when_sufficient
+   -> quantity >= ordered_quantity -> "여유"
+
+10. test_get_status_returns_부족_when_low
+    -> 0 < quantity < ordered_quantity -> "부족"
+
+11. test_get_status_returns_고갈_when_zero
+    -> quantity == 0 -> "고갈"
+```
 
 ---
 
 ## 예상 실패 이유
 
-`models/order.py` 파일이 존재하지 않으므로 import 시점에 `ModuleNotFoundError` 발생.
+`models/inventory.py`가 존재하지 않으므로 `ImportError`로 실패한다.
 
 ---
 
-## 구현 방향 (최소한의 코드)
-
-**`models/order.py`**
+## 구현 방향 (GREEN 단계)
 
 ```python
-class OrderModel(ObservableModel):
-    COLLECTION = "orders"
+# models/inventory.py
+from db import json_store as store
+from models.base import ObservableModel
 
-    def reserve(self, sample_id, customer_name, quantity) -> dict:
-        record = store.create(self.COLLECTION, {
-            "sample_id": sample_id,
-            "customer_name": customer_name,
-            "quantity": quantity,
-            "status": "RESERVED",
-        })
-        self._notify(ModelEvent(EventType.ADDED, record))
-        return record
+COLLECTION = "inventories"
 
-    def get_reserved(self) -> list[dict]:
-        return store.read_all(self.COLLECTION, status="RESERVED")
+class InventoryModel(ObservableModel):
+    def get_stock(self, sample_id: str) -> int:
+        records = store.read_all(COLLECTION, sample_id=sample_id)
+        return records[0]["quantity"] if records else 0
 
-    def get_by_status(self, status: str) -> list[dict]:
-        return store.read_all(self.COLLECTION, status=status)
+    def get_all_stocks(self) -> list[dict]:
+        return store.read_all(COLLECTION)
 
-    def get_by_id(self, order_id: str) -> dict | None:
-        return store.read_one(self.COLLECTION, order_id)
+    def is_sufficient(self, sample_id: str, quantity: int) -> bool:
+        return self.get_stock(sample_id) >= quantity
 
-    def _transition(self, order_id, from_status, to_status):
-        order = store.read_one(self.COLLECTION, order_id)
-        if order is None or order["status"] != from_status:
-            raise ValueError(f"주문 {order_id}의 상태가 {from_status}가 아닙니다.")
-        return store.update(self.COLLECTION, order_id, {"status": to_status})
+    def increase(self, sample_id: str, quantity: int) -> None:
+        records = store.read_all(COLLECTION, sample_id=sample_id)
+        if records:
+            record = records[0]
+            store.update(COLLECTION, record["id"], {"quantity": record["quantity"] + quantity})
+        else:
+            store.create(COLLECTION, {"sample_id": sample_id, "quantity": quantity})
 
-    def confirm(self, order_id):       return self._transition(order_id, "RESERVED",  "CONFIRMED")
-    def reject(self, order_id):        return self._transition(order_id, "RESERVED",  "REJECTED")
-    def set_producing(self, order_id): return self._transition(order_id, "RESERVED",  "PRODUCING")
-    def release(self, order_id):       return self._transition(order_id, "CONFIRMED", "RELEASE")
+    def decrease(self, sample_id: str, quantity: int) -> None:
+        current = self.get_stock(sample_id)
+        if current < quantity:
+            raise ValueError(f"재고 부족: 현재 {current}, 요청 {quantity}")
+        records = store.read_all(COLLECTION, sample_id=sample_id)
+        store.update(COLLECTION, records[0]["id"], {"quantity": current - quantity})
+
+    def get_status(self, sample_id: str, ordered_quantity: int) -> str:
+        stock = self.get_stock(sample_id)
+        if stock == 0:
+            return "고갈"
+        if stock < ordered_quantity:
+            return "부족"
+        return "여유"
 ```
-
-**이벤트 타입**: `models/base.py`의 `EventType`에 이미 `ADDED`가 있으므로 추가 불필요.
 
 ---
 
-## 범위 제한
+## 체크리스트
 
-- `models/order.py`만 생성
-- View / Controller / 다른 모델 수정 없음
-- STEP 3 기능만 구현 (STEP 5~6 연동 로직 없음)
+- [ ] Plan.md 사용자 승인
+- [ ] `tests/test_inventory_model.py` 작성 -> RED 확인
+- [ ] `models/inventory.py` 구현 -> GREEN 확인
+- [ ] REVIEW -> 커밋
