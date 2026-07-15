@@ -29,7 +29,7 @@ class SampleView:
     def get_sample_input(self) -> tuple[str, float, float]:
         section("시료 등록")
         name = prompt_input("시료 이름:")
-        avg_time = float(prompt_input("평균 생산시간(시간):"))
+        avg_time = float(prompt_input("평균 생산시간(min/ea):"))
         yield_rate = float(prompt_input("수율(0.0~1.0):"))
         return name, avg_time, yield_rate
 
@@ -44,7 +44,7 @@ class SampleView:
         rows = [
             {
                 "이름": s["name"],
-                "평균 생산시간(h)": f"{s['avg_production_time']:.1f}",
+                "평균 생산시간(min/ea)": f"{s['avg_production_time']:.1f}",
                 "수율": f"{s['yield_rate']:.2f}",
                 "재고": str(stocks.get(s["id"], "-")),
             }

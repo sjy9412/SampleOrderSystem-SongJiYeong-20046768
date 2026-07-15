@@ -37,7 +37,7 @@ class ProductionView:
         t.add_row("시료명",       info_data["sample_name"])
         t.add_row("주문 수량",    str(info_data["quantity"]))
         t.add_row("실 생산량",    str(info_data["actual_qty"]))
-        t.add_row("총 생산시간", f"{info_data['total_time']:.1f}h")
+        t.add_row("총 생산시간", f"{info_data['total_time']:.1f} min")
         console.print(Panel(t, title="[bold cyan]생산 중[/bold cyan]",
                             border_style="bright_black", expand=False))
 
@@ -55,7 +55,7 @@ class ProductionView:
                 "주문 ID": item["order_id"],
                 "시료명": item["sample_name"],
                 "고객명": item["customer_name"],
-                "수량": str(item["quantity"]),
+                "수량": f"{item['quantity']} ea",
             }
             for item in items
         ]
