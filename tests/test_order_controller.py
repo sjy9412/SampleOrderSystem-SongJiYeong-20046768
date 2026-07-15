@@ -32,7 +32,11 @@ class OrderViewStub:
         model.subscribe(self)
         self._inputs = iter([])
         self.shown_orders = []
+        self.shown_reserved_numbered = []
         self.stock_insufficient_shown = False
+        self.stock_checking_name = None
+        self.stock_detail_params = None
+        self.approve_result = None
         self.confirmation_shown = False
         self.last_order_no = None
         self.last_status = None
@@ -53,6 +57,17 @@ class OrderViewStub:
     def get_order_id(self, action): return self._next()
     def get_approve_or_reject(self): return self._next()
     def show_orders(self, orders): self.shown_orders = list(orders)
+    def show_reserved_orders_numbered(self, orders):
+        self.shown_reserved_numbered = list(orders)
+    def get_order_number_choice(self, count): return self._next()
+    def show_stock_checking(self, sample_name):
+        self.stock_checking_name = sample_name
+    def show_stock_detail(self, sample_name, stock, quantity, shortage):
+        self.stock_detail_params = dict(
+            sample_name=sample_name, stock=stock, quantity=quantity, shortage=shortage
+        )
+    def show_approve_result(self, order_no, status):
+        self.approve_result = (order_no, status)
     def show_stock_insufficient(self, stock, required): self.stock_insufficient_shown = True
     def show_error(self, message):
         self.last_error = message
@@ -101,8 +116,8 @@ def reserve_ctrl(order_model, sample_model, view):
 
 
 @pytest.fixture
-def approve_reject_ctrl(order_model, inventory_model, production_line, view):
-    return ApproveRejectController(order_model, inventory_model, production_line, view)
+def approve_reject_ctrl(order_model, sample_model, inventory_model, production_line, view):
+    return ApproveRejectController(order_model, sample_model, inventory_model, production_line, view)
 
 
 # ── TC-1: 주문 접수 → RESERVED 주문 생성 ──────────────────────────────────────
@@ -160,75 +175,98 @@ def test_reserve_shows_error_for_nonexistent_sample(reserve_ctrl, order_model, v
     assert "시료" in view.last_error
 
 
-# ── TC-2: 승인/거절 메뉴 진입 시 RESERVED 목록 표시 ──────────────────────────
+# ── TC-AR-1: 진입 시 RESERVED 목록 즉시 표시 (서브메뉴 없음) ─────────────────
 
-def test_approve_reject_menu_shows_reserved_orders(approve_reject_ctrl, order_model, view):
-    order_model.reserve("sample-1", "홍길동", 5)
-    order_model.reserve("sample-2", "이순신", 3)
-
-    view.set_inputs("1", "", "0")
+def test_run_immediately_shows_reserved_orders(
+    approve_reject_ctrl, order_model, sample_model, view
+):
+    sample = sample_model.add("실리콘 웨이퍼", 5.0, 0.95)
+    order_model.reserve(sample["id"], "홍길동", 5)
+    order_model.reserve(sample["id"], "이순신", 3)
+    view.set_inputs(0)
     approve_reject_ctrl.run()
+    assert len(view.shown_reserved_numbered) == 2
+    assert all(o["status"] == "RESERVED" for o in view.shown_reserved_numbered)
 
-    assert len(view.shown_orders) == 2
-    assert all(o["status"] == "RESERVED" for o in view.shown_orders)
 
-
-# ── TC-3: 승인 + 재고 충분 → CONFIRMED + 재고 차감 ───────────────────────────
+# ── TC-AR-2: 재고 충분 → 즉시 CONFIRMED + 재고 차감 ─────────────────────────
 
 def test_approve_confirms_when_stock_sufficient(
-    approve_reject_ctrl, order_model, inventory_model, view
+    approve_reject_ctrl, order_model, inventory_model, sample_model, view
 ):
-    inventory_model.increase("sample-1", 10)
-    order = order_model.reserve("sample-1", "홍길동", 5)
-
-    view.set_inputs("1", order["id"], "승인", "0")
+    sample = sample_model.add("실리콘 웨이퍼", 5.0, 0.95)
+    inventory_model.increase(sample["id"], 10)
+    order = order_model.reserve(sample["id"], "홍길동", 5)
+    view.set_inputs(1, 0)
     approve_reject_ctrl.run()
-
-    updated = order_model.get_by_id(order["id"])
-    assert updated["status"] == "CONFIRMED"
-    assert inventory_model.get_stock("sample-1") == 5
+    assert order_model.get_by_id(order["id"])["status"] == "CONFIRMED"
+    assert inventory_model.get_stock(sample["id"]) == 5
 
 
-# ── TC-4: 승인 + 재고 부족 + 재확인 승인 → PRODUCING + enqueue ───────────────
+# ── TC-AR-3: 재고 충분 → show_stock_checking, show_stock_detail 호출됨 ────────
+
+def test_approve_sufficient_shows_stock_info(
+    approve_reject_ctrl, order_model, inventory_model, sample_model, view
+):
+    sample = sample_model.add("실리콘 웨이퍼", 5.0, 0.95)
+    inventory_model.increase(sample["id"], 10)
+    order_model.reserve(sample["id"], "홍길동", 5)
+    view.set_inputs(1, 0)
+    approve_reject_ctrl.run()
+    assert view.stock_checking_name == "실리콘 웨이퍼"
+    assert view.stock_detail_params["shortage"] == 0
+
+
+# ── TC-AR-4: 재고 부족 + 재확인 승인 → PRODUCING + enqueue ──────────────────
 
 def test_approve_sets_producing_when_stock_insufficient_and_reconfirmed(
-    approve_reject_ctrl, order_model, inventory_model, production_line, view
+    approve_reject_ctrl, order_model, inventory_model, production_line, sample_model, view
 ):
-    inventory_model.increase("sample-1", 2)
-    order = order_model.reserve("sample-1", "홍길동", 5)
-
-    view.set_inputs("1", order["id"], "승인", "승인", "0")
+    sample = sample_model.add("실리콘 웨이퍼", 5.0, 0.95)
+    inventory_model.increase(sample["id"], 2)
+    order = order_model.reserve(sample["id"], "홍길동", 5)
+    view.set_inputs(1, "승인", 0)
     approve_reject_ctrl.run()
-
-    updated = order_model.get_by_id(order["id"])
-    assert updated["status"] == "PRODUCING"
+    assert order_model.get_by_id(order["id"])["status"] == "PRODUCING"
     assert order["id"] in production_line.enqueued
-    assert view.stock_insufficient_shown is True
 
 
-# ── TC-5: 승인 + 재고 부족 + 재확인 거절 → REJECTED ──────────────────────────
+# ── TC-AR-5: 재고 부족 + 재확인 거절 → REJECTED ──────────────────────────────
 
-def test_approve_insufficient_stock_then_reject_sets_rejected(
-    approve_reject_ctrl, order_model, inventory_model, view
+def test_approve_insufficient_then_reject(
+    approve_reject_ctrl, order_model, inventory_model, sample_model, view
 ):
-    inventory_model.increase("sample-1", 2)
-    order = order_model.reserve("sample-1", "홍길동", 5)
-
-    view.set_inputs("1", order["id"], "승인", "거절", "0")
+    sample = sample_model.add("실리콘 웨이퍼", 5.0, 0.95)
+    inventory_model.increase(sample["id"], 2)
+    order = order_model.reserve(sample["id"], "홍길동", 5)
+    view.set_inputs(1, "거절", 0)
     approve_reject_ctrl.run()
-
-    updated = order_model.get_by_id(order["id"])
-    assert updated["status"] == "REJECTED"
-    assert view.stock_insufficient_shown is True
+    assert order_model.get_by_id(order["id"])["status"] == "REJECTED"
 
 
-# ── TC-6: 거절 → REJECTED ─────────────────────────────────────────────────────
+# ── TC-AR-6: 처리 후 show_approve_result 호출 (order_no, status 전달) ─────────
 
-def test_reject_sets_rejected(approve_reject_ctrl, order_model, view):
-    order = order_model.reserve("sample-1", "홍길동", 5)
-
-    view.set_inputs("1", order["id"], "거절", "0")
+def test_approve_result_shown_after_confirm(
+    approve_reject_ctrl, order_model, inventory_model, sample_model, view
+):
+    sample = sample_model.add("실리콘 웨이퍼", 5.0, 0.95)
+    inventory_model.increase(sample["id"], 10)
+    order = order_model.reserve(sample["id"], "홍길동", 5)
+    view.set_inputs(1, 0)
     approve_reject_ctrl.run()
+    assert view.approve_result is not None
+    order_no, status = view.approve_result
+    assert order_no == order["order_no"]
+    assert status == "CONFIRMED"
 
-    updated = order_model.get_by_id(order["id"])
-    assert updated["status"] == "REJECTED"
+
+# ── TC-AR-7: 0 입력 → 처리 없이 종료 ─────────────────────────────────────────
+
+def test_zero_exits_without_processing(
+    approve_reject_ctrl, order_model, sample_model, view
+):
+    sample = sample_model.add("실리콘 웨이퍼", 5.0, 0.95)
+    order = order_model.reserve(sample["id"], "홍길동", 5)
+    view.set_inputs(0)
+    approve_reject_ctrl.run()
+    assert order_model.get_by_id(order["id"])["status"] == "RESERVED"

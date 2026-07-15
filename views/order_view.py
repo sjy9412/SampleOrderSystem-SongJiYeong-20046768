@@ -68,6 +68,59 @@ class OrderView:
         ]
         print_table(rows, col_labels={"status": "상태"})
 
+    def show_reserved_orders_numbered(self, orders: list[dict]) -> None:
+        section("승인 대기 주문 목록")
+        if not orders:
+            info("대기 중인 주문이 없습니다.")
+            return
+        rows = [
+            {
+                "번호": str(i),
+                "주문번호": o["order_no"],
+                "고객명": o["customer_name"],
+                "수량": f"{o['quantity']} ea",
+                "status": o["status"],
+            }
+            for i, o in enumerate(orders, 1)
+        ]
+        print_table(rows, col_labels={"status": "상태"})
+
+    def get_order_number_choice(self, count: int) -> int:
+        console.print(f"\n  [dim]번호를 입력하세요 (0: 뒤로, 1-{count}):[/dim] ", end="")
+        raw = input().strip()
+        try:
+            return int(raw)
+        except ValueError:
+            return -1
+
+    def show_stock_checking(self, sample_name: str) -> None:
+        info(f"재고 확인 중... [bold]{sample_name}[/bold]")
+
+    def show_stock_detail(
+        self, sample_name: str, stock: int, quantity: int, shortage: int
+    ) -> None:
+        from rich.table import Table
+        from rich import box as rbox
+        t = Table(box=rbox.ROUNDED, border_style="bright_black", show_header=True,
+                  header_style="bold white")
+        t.add_column("항목", no_wrap=True)
+        t.add_column("수량", no_wrap=True)
+        t.add_row("시료 이름", sample_name)
+        t.add_row("현재 재고", f"{stock} ea")
+        t.add_row("주문 수량", f"{quantity} ea")
+        shortage_text = f"[bold red]{shortage} ea[/bold red]" if shortage else "0 ea"
+        t.add_row("부족 수량", shortage_text)
+        console.print(t)
+
+    def show_approve_result(self, order_no: str, status: str) -> None:
+        from views.display import _STATUS_STYLES
+        style = _STATUS_STYLES.get(status, "")
+        if status == "REJECTED":
+            error(f"승인 거절  주문번호: [bold cyan]{order_no}[/bold cyan]")
+        else:
+            success(f"승인 완료  주문번호: [bold cyan]{order_no}[/bold cyan]")
+        console.print(f"  상태: [{style}]{status}[/{style}]")
+
     def show_stock_insufficient(self, stock: int, required: int) -> None:
         warn(f"재고 부족 — 현재 재고: [bold]{stock}[/bold], 주문 수량: [bold]{required}[/bold]")
         info("생산 라인에 등록하면 [bold cyan]PRODUCING[/bold cyan] 상태로 전환됩니다.")
