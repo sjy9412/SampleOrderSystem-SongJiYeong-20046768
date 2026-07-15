@@ -1,144 +1,141 @@
-# TDD Plan — STEP 5: 주문 승인/거절 View / Controller
+# STEP 6 — ProductionLine 모델 TDD Plan
 
-## Goal
+## 목표 (Goal)
 
-`OrderController` + `OrderView` 를 구현한다.
+`models/production_line.py` 구현 및 `tests/test_production_line.py` 작성.
 
-- 주문 접수(예약): RESERVED 상태 주문 생성
-- 승인/거절 메뉴: RESERVED 목록 표시 후 처리
-- 승인 + 재고 충분 → CONFIRMED + 재고 차감
-- 승인 + 재고 부족 → 안내 후 재확인 → 승인 시 PRODUCING + enqueue, 거절 시 REJECTED
-- 직접 거절 → REJECTED
+FIFO 생산 큐를 DB(`production_queue` 컬렉션)로 관리하고,
+생산량 산정 및 완료 처리(재고 증가 + 주문 CONFIRMED 전환)를 담당한다.
 
 ---
 
-## 작성할 테스트 (`tests/test_order_controller.py`)
+## 부가 변경: OrderModel
 
-### 공통 준비
+`complete()` 내부에서 PRODUCING → CONFIRMED 전환이 필요하다.
+현재 `OrderModel.confirm()`은 RESERVED → CONFIRMED만 지원하므로
+`OrderModel`에 `confirm_production(order_id)` 메서드를 추가한다.
+(메서드 1개 추가, 기존 로직 변경 없음)
+
+---
+
+## 구현 파일
+
+| 파일 | 변경 종류 |
+|------|-----------|
+| `models/order.py` | `confirm_production()` 메서드 추가 |
+| `models/production_line.py` | 신규 생성 |
+| `tests/test_production_line.py` | 신규 생성 |
+
+---
+
+## 생산량 산정 공식
+
+```
+부족분      = 주문 수량 - 현재 재고
+실 생산량   = ceil(부족분 / 수율)
+총 생산시간 = 평균 생산시간 × 실 생산량
+```
+
+---
+
+## 테스트 케이스 목록
+
+### calculate_production (순수 계산 — DB 불필요)
+
+| 테스트 이름 | 검증 내용 |
+|-------------|-----------|
+| `test_calculate_production_returns_correct_values` | shortage=90, yield=0.9, avg_time=2.0 → actual_qty=100, total_time=200.0 |
+| `test_calculate_production_uses_ceil` | shortage=10, yield=0.3 → ceil(10/0.3)=34 |
+
+### enqueue / get_queue / get_current
+
+| 테스트 이름 | 검증 내용 |
+|-------------|-----------|
+| `test_enqueue_adds_order_to_queue` | enqueue 후 get_queue() 에 해당 order_id 포함 |
+| `test_get_queue_returns_orders_in_fifo_order` | enqueue 두 건 → get_queue() 순서 FIFO 보장 |
+| `test_get_current_returns_first_in_queue` | enqueue 두 건 → get_current() 첫 번째 항목 반환 |
+| `test_get_current_returns_none_when_queue_is_empty` | 빈 큐 → None |
+
+### complete
+
+| 테스트 이름 | 검증 내용 |
+|-------------|-----------|
+| `test_complete_increases_inventory` | complete 후 재고가 실 생산량만큼 증가 |
+| `test_complete_confirms_order` | complete 후 주문 상태 CONFIRMED |
+| `test_complete_removes_order_from_queue` | complete 후 get_queue() 에서 해제됨 |
+
+---
+
+## 구현 방향 (최소한의 코드)
 
 ```python
-@pytest.fixture(autouse=True)
-def clean_db():
-    store.reset("orders")
-    store.reset("inventories")
-    yield
-    store.reset("orders")
-    store.reset("inventories")
+# models/production_line.py
+
+import math
+from db import json_store as store
+from models.base import ObservableModel
+
+COLLECTION = "production_queue"
+
+
+class ProductionLine(ObservableModel):
+
+    def __init__(self, order_model, inventory_model, sample_model):
+        super().__init__()
+        self._order_model = order_model
+        self._inventory_model = inventory_model
+        self._sample_model = sample_model
+
+    def enqueue(self, order_id: str) -> dict:
+        return store.create(COLLECTION, {"order_id": order_id})
+
+    def get_queue(self) -> list[dict]:
+        items = store.read_all(COLLECTION)
+        return sorted(items, key=lambda x: x["created_at"])
+
+    def get_current(self) -> dict | None:
+        queue = self.get_queue()
+        return queue[0] if queue else None
+
+    def calculate_production(
+        self, shortage: int, yield_rate: float, avg_time: float
+    ) -> tuple[int, float]:
+        actual_qty = math.ceil(shortage / yield_rate)
+        total_time = avg_time * actual_qty
+        return actual_qty, total_time
+
+    def complete(self, order_id: str) -> None:
+        order = self._order_model.get_by_id(order_id)
+        sample = self._sample_model.get_by_id(order["sample_id"])
+        current_stock = self._inventory_model.get_stock(order["sample_id"])
+        shortage = order["quantity"] - current_stock
+        actual_qty, _ = self.calculate_production(
+            shortage, sample["yield_rate"], sample["avg_production_time"]
+        )
+        self._inventory_model.increase(order["sample_id"], actual_qty)
+        self._order_model.confirm_production(order_id)
+        for item in store.read_all(COLLECTION, order_id=order_id):
+            store.delete(COLLECTION, item["id"])
 ```
 
-**stub 설계**
-
-- `ProductionLineStub`: `enqueue(order_id)` 호출 목록 기록
-- `OrderViewStub`:
-  - `set_inputs(*values)` → `get_menu_choice`, `get_order_input`, `get_order_id`, `get_approve_or_reject` 순서대로 소비
-  - `shown_orders`: `show_orders` 에 전달된 목록 캡처
-  - `stock_insufficient_shown`: `show_stock_insufficient` 호출 여부
-
----
-
-### TC-1: 주문 접수 → RESERVED 주문 생성
-
-```
-입력 시퀀스: 메뉴 "1" → get_order_input → (sample-1, 홍길동, 5) → 메뉴 "0"
-기대:
-  - order_model.get_reserved() 길이 == 1
-  - sample_id == "sample-1", customer_name == "홍길동", quantity == 5, status == "RESERVED"
-```
-
-### TC-2: 승인/거절 메뉴 진입 시 RESERVED 목록 표시
-
-```
-사전: RESERVED 주문 2건 생성
-입력 시퀀스: 메뉴 "2" → get_order_id → "" (빈값, 조기 종료) → 메뉴 "0"
-기대:
-  - view.shown_orders 길이 == 2
-  - 모두 status == "RESERVED"
-```
-
-### TC-3: 승인 + 재고 충분 → CONFIRMED + 재고 차감
-
-```
-사전: inventory_model.increase("sample-1", 10), 주문 수량 5
-입력 시퀀스: 메뉴 "2" → order_id → "승인" → 메뉴 "0"
-기대:
-  - order.status == "CONFIRMED"
-  - inventory_model.get_stock("sample-1") == 5
-```
-
-### TC-4: 승인 + 재고 부족 + 재확인 승인 → PRODUCING + enqueue
-
-```
-사전: inventory_model.increase("sample-1", 2), 주문 수량 5
-입력 시퀀스: 메뉴 "2" → order_id → "승인" → (재고 부족 안내) → "승인" → 메뉴 "0"
-기대:
-  - order.status == "PRODUCING"
-  - production_line.enqueued 에 order_id 포함
-  - view.stock_insufficient_shown == True
-```
-
-### TC-5: 승인 + 재고 부족 + 재확인 거절 → REJECTED
-
-```
-사전: inventory_model.increase("sample-1", 2), 주문 수량 5
-입력 시퀀스: 메뉴 "2" → order_id → "승인" → (재고 부족 안내) → "거절" → 메뉴 "0"
-기대:
-  - order.status == "REJECTED"
-  - view.stock_insufficient_shown == True
-```
-
-### TC-6: 거절 → REJECTED
-
-```
-사전: RESERVED 주문 1건
-입력 시퀀스: 메뉴 "2" → order_id → "거절" → 메뉴 "0"
-기대:
-  - order.status == "REJECTED"
+```python
+# models/order.py 에 추가
+def confirm_production(self, order_id: str) -> dict:
+    return self._transition(order_id, "PRODUCING", "CONFIRMED")
 ```
 
 ---
 
 ## 예상 실패 이유
 
-`controllers/order_controller.py`, `views/order_view.py` 가 존재하지 않아
-`ImportError` / `ModuleNotFoundError` 로 실패.
-
----
-
-## 구현 방향 (최소한의 코드)
-
-### `views/order_view.py`
-
-- `__init__(model)`: `model.subscribe(self)`
-- `show_menu()`: 메뉴 문자열 출력
-- `get_menu_choice()` → `input()`
-- `get_order_input()` → `(sample_id, customer_name, quantity)` 튜플
-- `get_order_id(action)` → `str`
-- `get_approve_or_reject()` → `"승인"` or `"거절"`
-- `show_orders(orders)`: 목록 테이블 출력
-- `show_stock_insufficient(stock, required)`: 재고 부족 안내
-- `show_error(message)`, `show_invalid_input()`, `show_exit()`, `on_model_changed(event)`
-
-### `controllers/order_controller.py`
-
-- `__init__(order_model, inventory_model, production_line, view)`
-- `run()`: while 루프, 0→종료, 1→_handle_reserve, 2→_handle_approve_reject
-- `_handle_reserve()`: `view.get_order_input()` → `order_model.reserve()`
-- `_handle_approve_reject()`:
-  1. `order_model.get_reserved()` → `view.show_orders()`
-  2. `view.get_order_id("처리")` → 빈값이면 return
-  3. `order_model.get_by_id()` → None이면 `view.show_error()` + return
-  4. `view.get_approve_or_reject()`
-     - `"거절"` → `order_model.reject()`
-     - `"승인"` + 재고 충분 → `inventory_model.decrease()` + `order_model.confirm()`
-     - `"승인"` + 재고 부족 → `view.show_stock_insufficient()` → 재확인
-       - `"승인"` → `order_model.set_producing()` + `production_line.enqueue()`
-       - `"거절"` → `order_model.reject()`
+테스트 작성 시 `models/production_line.py` 가 존재하지 않으므로
+`ImportError` 로 즉시 실패한다.
 
 ---
 
 ## 체크리스트
 
 - [ ] Plan.md 사용자 승인
-- [ ] `tests/test_order_controller.py` 작성 → RED 확인
-- [ ] `views/order_view.py`, `controllers/order_controller.py` 구현 → GREEN 확인
+- [ ] `tests/test_production_line.py` 작성 → RED 확인
+- [ ] `models/production_line.py` + `OrderModel.confirm_production()` 구현 → GREEN 확인
 - [ ] REVIEW → 커밋
