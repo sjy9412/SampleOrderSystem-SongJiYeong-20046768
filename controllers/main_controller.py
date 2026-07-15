@@ -1,6 +1,6 @@
 from __future__ import annotations
 from datetime import datetime
-from views.display import console, show_menu_panel, prompt_choice, error, info
+from views.display import console, show_menu_panel, prompt_choice, separator, error, info
 from rich.panel import Panel
 from rich.text import Text
 
@@ -58,7 +58,11 @@ class MainController:
 
     def run(self) -> None:
         console.print(BANNER)
+        first = True
         while True:
+            if not first:
+                separator()
+            first = False
             self._show_dashboard()
             console.print()
             show_menu_panel("메인 메뉴", [
@@ -75,6 +79,7 @@ class MainController:
                 console.print("\n  [cyan]시스템을 종료합니다. 안녕히 가세요![/cyan]\n")
                 break
             if choice.isdigit() and 1 <= int(choice) <= len(self._controllers):
+                separator()
                 self._controllers[int(choice) - 1].run()
             else:
                 from views.display import warn

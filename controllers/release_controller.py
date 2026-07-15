@@ -1,4 +1,5 @@
 from __future__ import annotations
+from views.display import separator
 
 
 class ReleaseController:
@@ -8,14 +9,20 @@ class ReleaseController:
         self._view = view
 
     def run(self) -> None:
+        first = True
         while True:
+            if not first:
+                separator()
+            first = False
             self._view.show_menu()
             choice = self._view.get_menu_choice()
             if choice == "0":
                 break
             elif choice == "1":
+                separator()
                 self._handle_list_confirmed()
             elif choice == "2":
+                separator()
                 self._handle_release()
             else:
                 self._view.show_invalid_input()

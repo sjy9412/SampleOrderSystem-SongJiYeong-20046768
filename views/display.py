@@ -97,6 +97,10 @@ def prompt_input(label: str) -> str:
     return input().strip()
 
 
+def separator() -> None:
+    console.rule(style="bright_black")
+
+
 def section(title: str) -> None:
     console.rule(f"[bold cyan]{title}[/bold cyan]", style="bright_black")
 

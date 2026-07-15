@@ -62,6 +62,29 @@ def test_dashboard_shows_production_queue_count(capsys):
     assert "1건 대기" in capsys.readouterr().out
 
 
+def _count_rule_lines(text: str) -> int:
+    """ANSI 제거 후 '─' 만으로 이루어진 줄(console.rule) 개수를 반환한다."""
+    import re
+    clean = re.sub(r'\x1b\[[0-9;]*[mGK]', '', text)
+    return sum(1 for line in clean.split('\n') if line.strip() and set(line.strip()) == {'─'})
+
+
+def test_shows_separator_between_iterations(capsys):
+    # 첫 번째 반복(즉시 종료)은 구분선 없음
+    ctrl_one = MainController([StubController()])
+    with patch("builtins.input", return_value="0"):
+        ctrl_one.run()
+    count_one = _count_rule_lines(capsys.readouterr().out)
+
+    # 두 번째 반복(서브 컨트롤러 진입 후 복귀)은 구분선 1개 이상
+    ctrl_two = MainController([StubController()])
+    with patch("builtins.input", side_effect=["1", "0"]):
+        ctrl_two.run()
+    count_two = _count_rule_lines(capsys.readouterr().out)
+
+    assert count_two > count_one
+
+
 # ──────────────────────────────────────────────
 # 기존 테스트
 # ──────────────────────────────────────────────
