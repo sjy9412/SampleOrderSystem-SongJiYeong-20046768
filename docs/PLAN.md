@@ -82,6 +82,9 @@
 | `2` | `_handle_list` | `SampleModel.get_all()` 호출 |
 | `3` | `_handle_search` | `SampleModel.search()` 호출 |
 
+> ⚠️ **미완성**: `_handle_list` / `_handle_search` 에서 `show_samples(samples, stocks)` 의 `stocks` 인자를 빈 dict `{}`로 고정 전달 중.  
+> `SampleController` 에 `InventoryModel` 을 주입해 실제 재고 수량을 함께 표시해야 한다.
+
 ---
 
 ### STEP 3 — 주문(Order) 모델
@@ -359,7 +362,7 @@ def create_app():
 | STEP 1 | Sample 모델 | ⬜ |
 | STEP 2 | 시료 관리 View / Controller | ⬜ |
 | STEP 3 | Order 모델 | ⬜ |
-| STEP 4 | Inventory 모델 | ⬜ |
+| STEP 4 | Inventory 모델 | ✅ |
 | STEP 5 | 주문 승인/거절 View / Controller | ⬜ |
 | STEP 6 | ProductionLine 모델 | ⬜ |
 | STEP 7 | 생산 라인 View / Controller | ⬜ |

@@ -1,137 +1,82 @@
-# Plan — STEP 4: Inventory (재고) 모델
+# TDD Plan — STEP 5: 주문 승인/거절 View / Controller
 
-## 목표 (Goal)
+## Goal
 
-`models/inventory.py`에 `InventoryModel`을 구현한다.  
-시료별 재고 수량을 DB에 영속화하고, 주문 대비 재고 상태를 판단하는 기능을 제공한다.
+`OrderController` + `OrderView` 를 구현한다.
 
----
-
-## 데이터 구조
-
-컬렉션명: `"inventories"`
-
-| 필드 | 타입 | 설명 |
-|------|------|------|
-| `sample_id` | str | 시료 ID (고유, 검색 키) |
-| `quantity` | int | 현재 재고 수량 |
-
-> `id`, `created_at`, `updated_at`는 `json_store.create()`가 자동 부여
+- 주문 접수(예약), 접수된 주문 목록, 주문 승인, 주문 거절 기능
+- 승인 시 재고 충분 → CONFIRMED + 재고 차감, 부족 → PRODUCING + enqueue
 
 ---
 
-## 구현 메서드
+## 작성할 테스트 (`tests/test_order_controller.py`)
 
-| 메서드 | 설명 |
-|--------|------|
-| `get_stock(sample_id)` | 특정 시료의 현재 재고 수량 반환 (없으면 0) |
-| `get_all_stocks()` | 전체 시료 재고 레코드 목록 반환 |
-| `is_sufficient(sample_id, quantity)` | 재고 >= quantity 이면 True |
-| `decrease(sample_id, quantity)` | 재고 차감. 재고 부족 시 ValueError |
-| `increase(sample_id, quantity)` | 재고 증가. 레코드 없으면 신규 생성 |
-| `get_status(sample_id, ordered_quantity)` | `"여유"` / `"부족"` / `"고갈"` 반환 |
-
-**상태 판단 규칙**
-- `"고갈"`: `quantity == 0`
-- `"부족"`: `0 < quantity < ordered_quantity`
-- `"여유"`: `quantity >= ordered_quantity`
-
----
-
-## 작성할 테스트 (tests/test_inventory_model.py)
-
+### TC-1: 주문 접수 → RESERVED 주문 생성
 ```
-1. test_get_stock_returns_zero_for_unknown_sample
-   -> 재고 레코드 없는 시료 조회 시 0 반환
+입력: sample_id, customer_name, quantity
+기대: OrderModel에 RESERVED 상태 주문이 생성된다
+```
 
-2. test_increase_creates_stock_record
-   -> increase 후 get_stock이 해당 수량 반환
+### TC-2: 접수된 주문 목록 → RESERVED 주문만 반환
+```
+입력: 미리 reserve된 주문들
+기대: view.show_orders가 RESERVED 목록을 받아 호출된다
+```
 
-3. test_increase_accumulates_quantity
-   -> 두 번 increase 하면 합계가 반환됨
+### TC-3: 승인 — 재고 충분 → CONFIRMED + 재고 차감
+```
+입력: 재고(10) >= 주문 수량(5)
+기대: order.status == "CONFIRMED", inventory 차감됨
+```
 
-4. test_decrease_reduces_stock
-   -> decrease 후 get_stock이 줄어든 수량 반환
+### TC-4: 승인 — 재고 부족 → PRODUCING + enqueue
+```
+입력: 재고(2) < 주문 수량(5)
+기대: order.status == "PRODUCING", production_line.enqueue(order_id) 호출됨
+```
 
-5. test_decrease_raises_when_insufficient
-   -> 재고보다 많은 양 차감 시 ValueError
-
-6. test_is_sufficient_returns_true_when_enough
-   -> quantity >= ordered_quantity -> True
-
-7. test_is_sufficient_returns_false_when_not_enough
-   -> quantity < ordered_quantity -> False
-
-8. test_get_all_stocks_returns_all_records
-   -> 여러 시료 increase 후 get_all_stocks() 결과 수 일치
-
-9. test_get_status_returns_여유_when_sufficient
-   -> quantity >= ordered_quantity -> "여유"
-
-10. test_get_status_returns_부족_when_low
-    -> 0 < quantity < ordered_quantity -> "부족"
-
-11. test_get_status_returns_고갈_when_zero
-    -> quantity == 0 -> "고갈"
+### TC-5: 거절 → REJECTED 전환
+```
+입력: RESERVED 상태 주문 ID
+기대: order.status == "REJECTED"
 ```
 
 ---
 
 ## 예상 실패 이유
 
-`models/inventory.py`가 존재하지 않으므로 `ImportError`로 실패한다.
+`controllers/order_controller.py`, `views/order_view.py` 가 존재하지 않아 `ImportError`.
 
 ---
 
-## 구현 방향 (GREEN 단계)
+## 구현 방향 (최소한의 코드)
 
-```python
-# models/inventory.py
-from db import json_store as store
-from models.base import ObservableModel
+### `views/order_view.py`
+- `__init__(model)`: `model.subscribe(self)`
+- `show_menu()`: 메뉴 문자열 출력
+- `get_menu_choice()`: `input()`
+- `get_order_input()` → `(sample_id, customer_name, quantity)`
+- `get_order_id(action)` → `str`
+- `show_orders(orders)`: 목록 출력
+- `show_error(message)`, `show_invalid_input()`, `show_exit()`, `on_model_changed(event)`
 
-COLLECTION = "inventories"
+### `controllers/order_controller.py`
+- `__init__(order_model, inventory_model, production_line, view)`
+- `run()`: while 루프, 메뉴 선택에 따라 핸들러 호출
+- `_handle_reserve()`: `view.get_order_input()` → `model.reserve()`
+- `_handle_list()`: `model.get_reserved()` → `view.show_orders()`
+- `_handle_approve()`: `view.get_order_id()` → 재고 판단 → confirm 또는 set_producing + enqueue
+- `_handle_reject()`: `view.get_order_id()` → `model.reject()`
 
-class InventoryModel(ObservableModel):
-    def get_stock(self, sample_id: str) -> int:
-        records = store.read_all(COLLECTION, sample_id=sample_id)
-        return records[0]["quantity"] if records else 0
-
-    def get_all_stocks(self) -> list[dict]:
-        return store.read_all(COLLECTION)
-
-    def is_sufficient(self, sample_id: str, quantity: int) -> bool:
-        return self.get_stock(sample_id) >= quantity
-
-    def increase(self, sample_id: str, quantity: int) -> None:
-        records = store.read_all(COLLECTION, sample_id=sample_id)
-        if records:
-            record = records[0]
-            store.update(COLLECTION, record["id"], {"quantity": record["quantity"] + quantity})
-        else:
-            store.create(COLLECTION, {"sample_id": sample_id, "quantity": quantity})
-
-    def decrease(self, sample_id: str, quantity: int) -> None:
-        current = self.get_stock(sample_id)
-        if current < quantity:
-            raise ValueError(f"재고 부족: 현재 {current}, 요청 {quantity}")
-        records = store.read_all(COLLECTION, sample_id=sample_id)
-        store.update(COLLECTION, records[0]["id"], {"quantity": current - quantity})
-
-    def get_status(self, sample_id: str, ordered_quantity: int) -> str:
-        stock = self.get_stock(sample_id)
-        if stock == 0:
-            return "고갈"
-        if stock < ordered_quantity:
-            return "부족"
-        return "여유"
-```
+### 테스트용 stub
+- `ProductionLineStub`: `enqueue(order_id)` 호출 기록
+- `OrderViewStub`: 미리 지정된 입력 반환, 출력 캡처
 
 ---
 
 ## 체크리스트
 
 - [ ] Plan.md 사용자 승인
-- [ ] `tests/test_inventory_model.py` 작성 -> RED 확인
-- [ ] `models/inventory.py` 구현 -> GREEN 확인
-- [ ] REVIEW -> 커밋
+- [ ] `tests/test_order_controller.py` 작성 → RED 확인
+- [ ] `views/order_view.py`, `controllers/order_controller.py` 구현 → GREEN 확인
+- [ ] REVIEW → 커밋
